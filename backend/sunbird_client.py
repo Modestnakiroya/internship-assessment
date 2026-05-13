@@ -5,9 +5,10 @@ Thin HTTP client for Sunbird AI tasks used by the assessment pipeline.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
+from requests.adapters import HTTPAdapter
 from dotenv import load_dotenv
 
 from languages import LANGUAGE_CODE_BY_NAME
@@ -30,7 +31,14 @@ def _response_json(resp: requests.Response) -> Any:
 
 
 # Very long inputs slow Sunflower more than they help the pipeline; cap for latency.
-_SUMMARY_INPUT_SOFT_CAP = 12_000
+_SUMMARY_INPUT_SOFT_CAP = 9_000
+
+
+def _req_timeout(read_seconds: int) -> Union[int, Tuple[int, int]]:
+    """Short connect timeout + generous read so we fail fast on dead routes, not on slow models."""
+    return (12, read_seconds)
+
+
 # Modal TTS schema maxLength is 10_000; stay under to avoid errors / stuck jobs.
 _TTS_TEXT_MAX_CHARS = 9_800
 # Modal STT can take several minutes on clips near the 5-minute audio cap (allow up to 10 min).
@@ -50,6 +58,9 @@ class SunbirdClient:
                 "SUNBIRD_API_TOKEN is not set. Add it to your environment or .env file."
             )
         self._session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=24, pool_maxsize=24, max_retries=0)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
     def _headers_json(self) -> Dict[str, str]:
         return {
@@ -83,7 +94,7 @@ class SunbirdClient:
             headers=self._headers_auth_only(),
             files=files,
             data=data,
-            timeout=_STT_HTTP_TIMEOUT_S,
+            timeout=_req_timeout(_STT_HTTP_TIMEOUT_S),
         )
         self._raise_for_bad_response(resp)
         payload = _response_json(resp)
@@ -101,13 +112,13 @@ class SunbirdClient:
             {
                 "role": "system",
                 "content": (
-                    "Summarize in clear English in at most 3 short sentences. "
+                    "Summarize in clear English in at most 2 short sentences. "
                     "No title or preamble — summary text only."
                 ),
             },
             {"role": "user", "content": body},
         ]
-        return self._sunflower_inference(messages, temperature=0.2)
+        return self._sunflower_inference(messages, temperature=0.12)
 
     def translate_to_ugandan(self, text: str, target_language_name: str) -> str:
         """Translate English text into a Ugandan language using NLLB."""
@@ -120,7 +131,7 @@ class SunbirdClient:
             url,
             json={"text": text, "source_language": src, "target_language": tgt},
             headers=self._headers_json(),
-            timeout=300,
+            timeout=_req_timeout(300),
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
@@ -151,7 +162,7 @@ class SunbirdClient:
             {"role": "system", "content": "You are a professional translator."},
             {"role": "user", "content": user},
         ]
-        return self._sunflower_inference(messages, temperature=0.15)
+        return self._sunflower_inference(messages, temperature=0.12)
 
     def synthesise(self, text: str, speaker_id: int) -> Dict[str, Any]:
         """
@@ -199,7 +210,7 @@ class SunbirdClient:
                 "response_mode": "url",
             },
             headers=self._headers_json(),
-            timeout=360,
+            timeout=_req_timeout(300),
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
@@ -223,7 +234,7 @@ class SunbirdClient:
             url,
             json={"text": payload_text, "speaker_id": speaker_id},
             headers=self._headers_json(),
-            timeout=360,
+            timeout=_req_timeout(300),
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
@@ -247,7 +258,7 @@ class SunbirdClient:
             "temperature": temperature,
             "stream": False,
         }
-        resp = self._post(url, json=payload, headers=self._headers_json(), timeout=_SUNFLOWER_HTTP_TIMEOUT_S)
+        resp = self._post(url, json=payload, headers=self._headers_json(), timeout=_req_timeout(_SUNFLOWER_HTTP_TIMEOUT_S))
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
         content = data.get("content")
