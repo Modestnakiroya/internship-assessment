@@ -43,4 +43,6 @@ export BACKEND_URL="http://127.0.0.1:8000"
 streamlit run app.py \
   --server.port "${STREAMLIT_SERVER_PORT:-7860}" \
   --server.address 0.0.0.0 \
-  --server.headless true
+  --server.headless true \
+  --server.enableXsrfProtection false \
+  --server.maxUploadSize 500

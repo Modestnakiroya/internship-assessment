@@ -7,5 +7,8 @@ font = "sans serif"
 
 [server]
 headless = true
-# WhatsApp / long clips: avoid Streamlit rejecting uploads (red row) on Spaces (value is MB).
+# Hugging Face Spaces / reverse proxies: browser uploads often fail with 403 (AxiosError) when
+# XSRF cookies cannot be set or forwarded. Disabling is normal for public demo Spaces.
+enableXsrfProtection = false
+# WhatsApp / long clips (value is MB).
 maxUploadSize = 500
