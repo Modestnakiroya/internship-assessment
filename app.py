@@ -25,6 +25,41 @@ def _backend_url() -> str:
     return os.environ.get("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
+def _pipeline_url(backend: str) -> str:
+    """POST /pipeline on the FastAPI root (no trailing slash issues)."""
+    base = (backend or "").strip().rstrip("/") or "http://127.0.0.1:8000"
+    return f"{base}/pipeline"
+
+
+def post_pipeline(
+    backend: str,
+    *,
+    target_language: str,
+    text: str | None = None,
+    audio: tuple[str, bytes, str] | None = None,
+) -> requests.Response:
+    """
+    POST multipart/form-data to /pipeline — matches FastAPI Form + optional File.
+
+    Always use multipart (even for text-only) so ``File(None)`` + ``Form`` routes
+    behave consistently across proxies and Starlette versions.
+    """
+    url = _pipeline_url(backend)
+    if audio is not None:
+        name, raw, mime = audio
+        files = {
+            "target_language": (None, target_language),
+            "audio": (name, raw, mime or "application/octet-stream"),
+        }
+        return requests.post(url, files=files, timeout=600)
+
+    files = {
+        "target_language": (None, target_language),
+        "text": (None, (text or "").strip()),
+    }
+    return requests.post(url, files=files, timeout=600)
+
+
 def _inject_layout_css() -> None:
     st.markdown(
         """
@@ -104,24 +139,47 @@ def _inject_layout_css() -> None:
 
 
 def _format_error(resp: requests.Response) -> str:
+    msg: str
     try:
         body: Any = resp.json()
     except ValueError:
-        return resp.text[:4000] or f"HTTP {resp.status_code}"
+        msg = resp.text[:4000] or f"HTTP {resp.status_code}"
+        if resp.status_code == 405:
+            msg += _format_error_405_hint(resp)
+        return msg
+
     detail = body.get("detail")
     if isinstance(detail, list):
         parts = []
         for err in detail:
             if isinstance(err, dict):
                 loc = err.get("loc", ())
-                msg = err.get("msg", "")
-                parts.append(f"{'/'.join(str(x) for x in loc)}: {msg}")
+                em = err.get("msg", "")
+                parts.append(f"{'/'.join(str(x) for x in loc)}: {em}")
             else:
                 parts.append(str(err))
-        return "; ".join(parts) if parts else str(body)
-    if detail is not None:
-        return str(detail)
-    return str(body)
+        msg = "; ".join(parts) if parts else str(body)
+    elif detail is not None:
+        msg = str(detail)
+    else:
+        msg = str(body)
+
+    if resp.status_code == 405:
+        msg += _format_error_405_hint(resp)
+    return msg
+
+
+def _format_error_405_hint(resp: requests.Response) -> str:
+    allow = resp.headers.get("Allow", "")
+    hint = (
+        "\n\n**HTTP 405 — Method Not Allowed.** The server received the path but rejects this HTTP method. "
+        "Typical mistake: `BACKEND_URL` targets the **Streamlit** server (often port **8501**) instead of **FastAPI** "
+        "(default **http://127.0.0.1:8000**). Start the API with `uvicorn backend.main:app --port 8000` and point "
+        "`BACKEND_URL` at that host and port."
+    )
+    if allow:
+        hint += f"\n\n`Allow` response header: `{allow}`"
+    return hint
 
 
 def _hero() -> None:
@@ -322,28 +380,22 @@ def main() -> None:
         st.warning("Please upload an audio file before running the pipeline.")
         return
 
-    data = {"target_language": target_language}
-    files = None
-    if mode == "Text":
-        data["text"] = text_value.strip()
-    else:
-        assert uploaded is not None
-        files = {
-            "audio": (
-                uploaded.name,
-                uploaded.getvalue(),
-                uploaded.type or "application/octet-stream",
-            ),
-        }
-
     t0 = time.perf_counter()
     with st.spinner("Processing on the server… (transcription can take a while)"):
         try:
-            resp = requests.post(
-                f"{backend}/pipeline",
-                data=data,
-                files=files,
-                timeout=600,
+            resp = post_pipeline(
+                backend,
+                target_language=target_language,
+                text=text_value.strip() if mode == "Text" else None,
+                audio=(
+                    (
+                        uploaded.name,
+                        uploaded.getvalue(),
+                        uploaded.type or "application/octet-stream",
+                    )
+                    if mode == "Audio" and uploaded is not None
+                    else None
+                ),
             )
         except requests.RequestException as exc:
             st.session_state["last_pipeline_result"] = None
