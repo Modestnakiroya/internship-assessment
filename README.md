@@ -136,10 +136,13 @@ All routes expect the server process to have `SUNBIRD_API_TOKEN` set.
 
 1. Create a new Space at [huggingface.co/new-space](https://huggingface.co/new-space), choose **Docker** as the SDK.
 2. Push this repository (including `Dockerfile` and `start.sh`). The image starts **FastAPI** on `127.0.0.1:8000`, waits until `GET /health` succeeds, then starts **Streamlit** on port **7860** (configurable).
-3. In Space **Settings → Variables and secrets**, add a secret **`SUNBIRD_API_TOKEN`** with your token.
-4. Optional Space variables:
-   - **`STREAMLIT_SERVER_PORT`** — if your Space expects a different Streamlit port (default `7860`).
-   - **`BACKEND_URL`** — default is `http://127.0.0.1:8000` (correct for this Docker layout). Only change if you host the API elsewhere.
+3. In Space **Settings → Variables and secrets**, add **`SUNBIRD_API_TOKEN`** (required) with your Sunbird bearer token.
+   - **Do not** set **`BACKEND_URL`** to your public Space URL (`https://*.hf.space`). From inside the container, Streamlit must call FastAPI at **`http://127.0.0.1:8000`**. The included **`start.sh`** forces that URL before starting Streamlit so a mistaken secret cannot break the app.
+   - Optional: **`STREAMLIT_SERVER_PORT`** if your Space expects a different Streamlit port (default `7860`).
+
+### HTTP 405 (`Method Not Allowed`) on Hugging Face
+
+If the UI shows **HTTP 405** for `/pipeline`, Streamlit is almost certainly posting to the **wrong host** (the public `hf.space` URL or the Streamlit port). The API lives only on **`127.0.0.1:8000`** inside the Docker container. Remove a wrong **`BACKEND_URL`** secret, redeploy, or rely on **`start.sh`** which forces the internal URL.
 
 ### Space card (README on Hugging Face)
 
@@ -172,7 +175,7 @@ Open `http://localhost:7860`. The UI uses `BACKEND_URL=http://127.0.0.1:8000` in
 
 ### Streamlit SDK Space (not recommended here)
 
-The built-in Streamlit template only starts Streamlit; it will **not** start FastAPI unless you switch to Docker or host the API elsewhere and set **`BACKEND_URL`** in Streamlit secrets to that public API URL.
+The built-in Streamlit template only starts Streamlit; it will **not** start FastAPI unless you switch to Docker or host the API on a **separate** public service and set **`BACKEND_URL`** to that API’s base URL (not the Streamlit Space URL).
 
 ## Known limitations
 

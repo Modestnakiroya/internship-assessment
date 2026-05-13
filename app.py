@@ -9,6 +9,7 @@ import os
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 import streamlit as st
@@ -22,7 +23,24 @@ STEP_LABELS = ("Input", "Transcribe", "Summarise", "Translate", "Speech")
 
 
 def _backend_url() -> str:
-    return os.environ.get("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    """
+    FastAPI base URL (not the browser / Streamlit URL).
+
+    On Hugging Face Spaces, users sometimes set BACKEND_URL to the public Space URL
+    (https://*.hf.space). POST /pipeline there hits Streamlit, which responds with
+    HTTP 405 Method Not Allowed. Always use the internal uvicorn address instead.
+    """
+    default = "http://127.0.0.1:8000"
+    raw = (os.environ.get("BACKEND_URL") or default).strip().rstrip("/")
+    if not raw:
+        return default
+    try:
+        host = (urlparse(raw).hostname or "").lower()
+    except ValueError:
+        return default
+    if host.endswith("hf.space") or "huggingface.co" in raw.lower():
+        return default
+    return raw
 
 
 def _pipeline_url(backend: str) -> str:
@@ -172,10 +190,11 @@ def _format_error(resp: requests.Response) -> str:
 def _format_error_405_hint(resp: requests.Response) -> str:
     allow = resp.headers.get("Allow", "")
     hint = (
-        "\n\n**HTTP 405 — Method Not Allowed.** The server received the path but rejects this HTTP method. "
-        "Typical mistake: `BACKEND_URL` targets the **Streamlit** server (often port **8501**) instead of **FastAPI** "
-        "(default **http://127.0.0.1:8000**). Start the API with `uvicorn backend.main:app --port 8000` and point "
-        "`BACKEND_URL` at that host and port."
+        "\n\n**HTTP 405 — Method Not Allowed.** The path exists but this HTTP method is not allowed here. "
+        "Typical causes: (1) **`BACKEND_URL` is your public Hugging Face Space URL** (`https://*.hf.space`) — "
+        "POST `/pipeline` then hits **Streamlit**, not FastAPI. Use **`http://127.0.0.1:8000`** inside the same "
+        "container (see `start.sh`). (2) **`BACKEND_URL` points at Streamlit** (e.g. port **8501**) instead of "
+        "**uvicorn** on **8000**."
     )
     if allow:
         hint += f"\n\n`Allow` response header: `{allow}`"

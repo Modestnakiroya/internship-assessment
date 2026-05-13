@@ -35,6 +35,11 @@ else:
     raise SystemExit("FastAPI backend did not become ready at " + url)
 PY
 
+# Streamlit must call FastAPI inside this container. If BACKEND_URL was set to the
+# public Hugging Face Space URL (https://*.hf.space), POST /pipeline hits Streamlit
+# and returns HTTP 405. Force the internal API base for this process.
+export BACKEND_URL="http://127.0.0.1:8000"
+
 streamlit run app.py \
   --server.port "${STREAMLIT_SERVER_PORT:-7860}" \
   --server.address 0.0.0.0 \
