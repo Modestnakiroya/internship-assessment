@@ -1,139 +1,200 @@
-# Sunbird AI Internship Assessment Exercise
+# Sunbird AI internship assessment — GenAI pipeline app
 
-This assessment consists of 3 parts:
-- Programming exercises.
-- Build a simple command line app using the Sunbird AI API.
+This project is a small **Streamlit + FastAPI** application that runs a fixed pipeline over **Sunbird AI** only: **Speech-to-Text (optional) → summarise → translate → Text-to-Speech**. You can also call each step through separate REST endpoints for testing.
 
-## Getting started
-- Fork this repository to create your own copy. ([More info about forking a repository](https://docs.github.com/en/get-started/quickstart/fork-a-repo))
-- Clone your repository to access it locally: `git clone https://github.com/<your-username>/internship-assessment.git`. (Replace `<your-username>` with your Github username.)
-- Change directory into the `internship-assessment` folder after cloning the repository.
-- Create a python virtual environment: `python -m venv venv`
-- Activate the virtual environment: 
-  - Linux/Mac: `source venv/bin/activate`
-  - Windows: `venv\Scripts\activate.bat`
-- Install the required python packages: `pip install -r requirements.txt`
-- Run the command `pytest`. (The tests should be failing, it's your task to make them pass. See below for instructions)
+## Project description
 
-## Part 1: Programming exercises
-There are 2 programming exercises designed to test your competency with the python programming language. 
+Users provide **either** pasted text **or** an audio file (up to **5 minutes**), choose one of five **Ugandan target languages** (Luganda, Runyankole, Ateso, Lugbara, Acholi), and receive an **English summary**, a **translated summary** in the chosen language, and **spoken audio** of that translation. When the input is audio, the **transcript** is shown as an intermediate step. All model calls go to **https://api.sunbird.ai** (STT, Sunflower summarisation, NLLB translation for the pipeline step, and TTS).
 
-You can find the starter code and task descriptions in the `exercises/basics.py` file in this repo.
+## Architecture
 
-Run the following command: `pytest`. You will see that all the tests are failing.
-
-Your goal is to implement the 2 functions `collatz` and `distinct_numbers` to make the above failing tests pass.
-
-You can keep running the `pytest` command to see which tests are still failing and fix your code accordingly.
-
-## Part 2: Build a GenAI Application with Sunbird AI
-
-Build a small **Generative AI web application** powered by Sunbird AI's [Sunflower LLM](https://sunflower.sunbird.ai/) and the [Sunbird AI API](https://docs.sunbird.ai/introduction).
-
-The application should let a user provide either **text** or an **audio file**, then run the input through this pipeline:
-
-1. **Input** — accept either typed/pasted text **or** an uploaded audio file.
-2. **Transcribe (audio only)** — if the input is audio, transcribe it to text using Sunbird's Speech-to-Text API.
-3. **Summarise** — summarise the text (typed input or transcribed text) using the Sunflower LLM.
-4. **Translate** — translate the summary into a chosen Ugandan local language (Luganda, Runyankole, Ateso, Lugbara, or Acholi) using the Sunflower LLM.
-5. **Synthesise speech** — generate an audio clip of the translated summary using Sunbird's Text-to-Speech API.
-6. **Output** — display the original text, the summary, the translated summary, and the generated audio (playable in the UI).
-
-### Tech stack requirements
-
-- **Backend:** Python (you may use FastAPI, Flask, or call the Sunbird API directly from your frontend framework — your choice).
-- **Frontend:** one of [Gradio](https://www.gradio.app/), [Streamlit](https://streamlit.io/), or [Next.js](https://nextjs.org/docs).
-- **APIs:** all AI capabilities **must** come from Sunbird AI. Do not call OpenAI, Anthropic, or any other model provider for the core pipeline.
-
-### Sunbird AI API references
-
-Read these docs carefully before implementing — they show the exact request/response shapes and authentication you'll need:
-
-- **Speech-to-Text (STT):** https://docs.sunbird.ai/guides/speech-to-text
-- **Text-to-Speech (TTS):** https://docs.sunbird.ai/guides/text-to-speech
-- **Summarisation & Translation (Sunflower Simple Inference):** https://docs.sunbird.ai/guides/sunflower-chat
-- **Full API reference:** https://docs.sunbird.ai/api-reference/introduction
-
-You will need a Sunbird AI API token. Sign up and obtain one from the [Sunbird AI API portal](https://api.sunbird.ai/), then store it in a `.env` file as `SUNBIRD_API_TOKEN` (or equivalent). **Never commit your token to git.**
-
-### Functional requirements
-
-- Input switching: the UI must clearly let the user choose between text input and audio upload.
-- Audio constraint: reject audio files longer than **5 minutes** with a clear error message.
-- Language picker: allow the user to select the target local language for the translated summary.
-- Visible intermediate results: the UI should show the transcript (when audio is used), the summary, the translated summary, and the generated audio player — not just the final audio.
-- Sensible error handling: surface API failures to the user instead of silently failing.
-
-### Suggested project layout
-
+```text
+┌─────────────┐     HTTP      ┌──────────────────┐      HTTPS       ┌─────────────────┐
+│  Streamlit  │ ────────────► │  FastAPI         │ ────────────────► │  Sunbird AI API │
+│   app.py    │   multipart   │  backend/main.py │   Bearer token   │  tasks/*        │
+└─────────────┘               └────────┬─────────┘                  └─────────────────┘
+                                       │
+                              backend/pipeline.py
+                              backend/sunbird_client.py
 ```
+
+- **`app.py`** — Streamlit UI: input mode (text vs audio), target language, calls `POST /pipeline`, shows transcript (if audio), summary, translated summary, and `st.audio` for the signed TTS URL. Surfaces API/validation errors with `st.error`.
+- **`backend/main.py`** — FastAPI routes: `/transcribe`, `/summarise`, `/translate`, `/synthesise`, `/pipeline`, plus `/health`.
+- **`backend/sunbird_client.py`** — HTTP wrappers: `POST /tasks/stt`, `POST /tasks/sunflower_simple` (summarise + free-form translate), `POST /tasks/nllb_translate` (pipeline translate from English summary), `POST /tasks/tts`.
+- **`backend/pipeline.py`** — Orchestrates the end-to-end flow and enforces the **5-minute** audio cap using `tinytag`.
+
+### Pipeline mapping to Sunbird endpoints
+
+| Step | Sunbird endpoint |
+|------|------------------|
+| STT (audio only) | [`POST /tasks/stt`](https://docs.sunbird.ai/guides/speech-to-text) |
+| Summarise | [`POST /tasks/sunflower_simple`](https://docs.sunbird.ai/guides/sunflower-chat) |
+| Translate (inside `/pipeline`) | [`POST /tasks/nllb_translate`](https://docs.sunbird.ai/) (English summary → local language) |
+| Standalone `/translate` | [`POST /tasks/sunflower_simple`](https://docs.sunbird.ai/guides/sunflower-chat) (any source text → target language) |
+| TTS | [`POST /tasks/tts`](https://docs.sunbird.ai/guides/text-to-speech) |
+
+## Local setup
+
+**Prerequisites:** Python **3.10+**, `git`, and a Sunbird API token from [api.sunbird.ai](https://api.sunbird.ai/).
+
+1. **Clone** your fork and enter the project directory.
+
+2. **Create and activate a virtual environment**
+
+   ```bash
+   python -m venv venv
+   # Windows (cmd):
+   venv\Scripts\activate.bat
+   # Windows (PowerShell):
+   .\venv\Scripts\Activate.ps1
+   # macOS / Linux:
+   source venv/bin/activate
+   ```
+
+3. **Install dependencies**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Environment variables**
+
+   Copy `.env.example` to `.env` and set at least `SUNBIRD_API_TOKEN`.
+
+   ```bash
+   cp .env.example .env
+   # Edit .env — never commit real tokens.
+   ```
+
+5. **Run the backend** (from the project root, with the venv active):
+
+   ```bash
+   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+6. **Run the Streamlit app** (second terminal, same venv, project root):
+
+   ```bash
+   streamlit run app.py
+   ```
+
+   Open the URL Streamlit prints (usually `http://localhost:8501`). The UI calls the API at `BACKEND_URL` (default `http://127.0.0.1:8000`).
+
+7. **Part 1 tests** (optional):
+
+   ```bash
+   pytest
+   ```
+
+## Environment variables
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `SUNBIRD_API_TOKEN` | **Yes** (for API routes) | Bearer token for `https://api.sunbird.ai`. |
+| `BACKEND_URL` | No | Base URL of FastAPI for `app.py` (default `http://127.0.0.1:8000`). |
+
+## Usage walkthrough
+
+1. Start **uvicorn** and **streamlit** as above and ensure `.env` contains a valid `SUNBIRD_API_TOKEN`.
+2. In the browser, choose **Text** or **Audio**.
+3. Pick a **target Ugandan language**.
+4. Click **Run pipeline**.
+5. Review **Transcript** (audio only), **Summary (English)**, **Translated summary**, and play the **synthesised speech** (temporary signed URL from Sunbird TTS).
+6. If something fails (network, quota, validation), the error message from the backend is shown in the UI.
+
+### CLI tools (Parts 2a–2b)
+
+- `python translate.py` — interactive translation CLI.
+- `python transcribe.py` — interactive STT CLI with the same 5-minute rule.
+
+## API quick reference
+
+All routes expect the server process to have `SUNBIRD_API_TOKEN` set.
+
+| Method | Path | Body |
+|--------|------|------|
+| `POST` | `/transcribe` | multipart: `audio` (file), optional form `language` (default `eng`) |
+| `POST` | `/summarise` | JSON `{"text": "..."}` |
+| `POST` | `/translate` | JSON `{"text": "...", "target_language": "Luganda"}` (name must be one of the five locals) |
+| `POST` | `/synthesise` | JSON `{"text": "...", "language": "Luganda"}` |
+| `POST` | `/pipeline` | multipart: `target_language` (required), optional `text`, optional `audio` file — exactly one of `text` or `audio` |
+| `GET` | `/health` | Liveness check |
+
+## Deployment on Hugging Face Spaces
+
+**Important:** A default **Streamlit-only** Space runs a single process. This project also needs **FastAPI** on another port on the same machine, so the most reliable approach is a **Docker** Space (or any host where you can run two processes).
+
+### Docker Space (recommended)
+
+1. Create a new Space at [huggingface.co/new-space](https://huggingface.co/new-space), choose **Docker** as the SDK.
+2. Push this repository (including `Dockerfile` and `start.sh`). The image starts **FastAPI** on `127.0.0.1:8000`, waits until `GET /health` succeeds, then starts **Streamlit** on port **7860** (configurable).
+3. In Space **Settings → Variables and secrets**, add a secret **`SUNBIRD_API_TOKEN`** with your token.
+4. Optional Space variables:
+   - **`STREAMLIT_SERVER_PORT`** — if your Space expects a different Streamlit port (default `7860`).
+   - **`BACKEND_URL`** — default is `http://127.0.0.1:8000` (correct for this Docker layout). Only change if you host the API elsewhere.
+
+### Space card (README on Hugging Face)
+
+Hugging Face can read YAML **front matter** at the very top of the Space `README.md` for the card title, emoji, and SDK. If your GitHub `README.md` should stay plain for reviewers, add this only on the branch you push to Hugging Face, or prepend when creating the Space:
+
+```yaml
+---
+title: Sunbird Pipeline
+emoji: 🌍
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+```
+
+Then keep the rest of your project README below the closing `---`.
+
+### Build and run Docker locally
+
+From the project root (Docker installed):
+
+```bash
+docker build -t sunbird-pipeline .
+docker run --rm -p 7860:7860 -e SUNBIRD_API_TOKEN="your_token_here" sunbird-pipeline
+```
+
+Open `http://localhost:7860`. The UI uses `BACKEND_URL=http://127.0.0.1:8000` inside the container by default.
+
+### Streamlit SDK Space (not recommended here)
+
+The built-in Streamlit template only starts Streamlit; it will **not** start FastAPI unless you switch to Docker or host the API elsewhere and set **`BACKEND_URL`** in Streamlit secrets to that public API URL.
+
+## Known limitations
+
+- Audio longer than **5 minutes** is rejected locally with a clear error (before calling STT where possible).
+- **TTS signed URLs** expire quickly (Sunbird documentation: on the order of minutes). Play or download soon after generation.
+- The **pipeline** assumes the **summary** is in **English** so **NLLB** can translate into the selected Ugandan language. Very short or noisy input may yield poor summaries or empty STT.
+- Sunbird **rate limits** and occasional **503** responses apply per their docs; the UI surfaces error text from the backend.
+
+## Repository layout
+
+```text
 .
-├── app.py                  # entry point (Gradio/Streamlit) OR Next.js app/
+├── app.py                  # Streamlit frontend
 ├── backend/
-│   ├── sunbird_client.py   # thin wrapper around Sunbird API endpoints
-│   ├── pipeline.py         # orchestrates STT -> summarise -> translate -> TTS
-│   └── ...
-├── requirements.txt        # or package.json if Next.js + Python backend
-├── .env.example            # document required env vars (no real secrets)
-└── README.md               # see Part 3
+│   ├── main.py             # FastAPI routes
+│   ├── sunbird_client.py   # Sunbird HTTP client
+│   └── pipeline.py         # STT → summarise → translate → TTS
+├── exercises/              # Part 1
+├── tests/
+├── translate.py
+├── transcribe.py
+├── languages.py
+├── requirements.txt
+├── .env.example
+├── Dockerfile
+├── start.sh
+├── .dockerignore
+└── README.md
 ```
 
-## Part 3: Documentation & Deployment
+## Licence / attribution
 
-A working app you can't run isn't a working app. For this part, you must (a) document your project so a reviewer can run it locally, and (b) deploy it publicly so we can try it without setting anything up.
-
-### README requirements
-
-Replace this README (or add a `PROJECT_README.md` next to it) with documentation that includes:
-
-- **Project description** — one paragraph on what the app does.
-- **Architecture overview** — a short diagram or bullet list of the pipeline (input → STT → summarise → translate → TTS → output) and which Sunbird endpoints handle each step.
-- **Local setup** — exact, copy-pasteable steps to clone, install dependencies, configure environment variables (with a `.env.example` reference), and run the app locally.
-- **Environment variables** — list every required variable and what it does.
-- **Usage** — a short walkthrough showing the app being used end-to-end (screenshots are encouraged).
-- **Deployed link** — a public URL where reviewers can try the app.
-- **Known limitations** — anything that doesn't work, or constraints (e.g. 5-minute audio cap, supported languages).
-
-### Deployment
-
-Deploy your app to a free hosting provider that fits your stack. Pick one:
-
-#### Option A — Hugging Face Spaces (recommended for Gradio/Streamlit)
-
-1. Create a free account at https://huggingface.co/join.
-2. Create a new Space: https://huggingface.co/new-space — choose **Gradio** or **Streamlit** as the SDK and a public visibility.
-3. Add your Sunbird API token as a Space secret: Space settings → **Variables and secrets** → **New secret** → name it `SUNBIRD_API_TOKEN`.
-4. Push your code to the Space's git repo:
-   ```bash
-   git remote add space https://huggingface.co/spaces/<your-username>/<your-space-name>
-   git push space main
-   ```
-5. Hugging Face will build and deploy automatically. Confirm your `requirements.txt` lists every Python dependency and that your entry file matches the SDK convention (`app.py` for both Gradio and Streamlit).
-
-Reference: https://huggingface.co/docs/hub/spaces-overview
-
-#### Option B — Vercel (recommended for Next.js + Python backend)
-
-1. Create a free account at https://vercel.com/signup and install the CLI: `npm i -g vercel@latest`.
-2. From your project root, link the project: `vercel link`.
-3. Add your Sunbird API token as an environment variable for all environments:
-   ```bash
-   vercel env add SUNBIRD_API_TOKEN
-   ```
-   (You'll be prompted to select Development, Preview, and Production — select all that apply.)
-4. Pull the env vars locally for development: `vercel env pull .env.local`.
-5. Deploy:
-   - Preview: `vercel`
-   - Production: `vercel --prod`
-6. If you have a Python backend (FastAPI/Flask), put it under an `api/` directory or a separate Python service — Vercel runs Python via Fluid Compute. See https://vercel.com/docs/functions/runtimes/python.
-
-Reference: https://vercel.com/docs/getting-started-with-vercel
-
-### Submission
-
-Your final submission must include:
-
-- A pull request (or repository link) with all your code.
-- An updated README that meets the requirements above.
-- **A working deployed link** that we can open and use end-to-end with at least one test input.
-
+Built for the Sunbird AI internship assessment; API usage is subject to [Sunbird AI](https://sunbird.ai/) terms and quotas.
