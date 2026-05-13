@@ -67,6 +67,25 @@ def post_pipeline(
     return requests.post(url, files=files, timeout=_PIPELINE_HTTP_TIMEOUT_S)
 
 
+# Session snapshot so "Run audio pipeline" still works if the uploader widget returns None on the
+# same rerun (common on Hugging Face). Do not put the uploader inside st.form — that often shows
+# the red error state for valid OGG/WhatsApp files.
+_AUDIO_WIDGET_KEY = "pipeline_audio_only"
+_AUDIO_SNAP_KEY = "audio_pipeline_snap"
+
+
+def _pipeline_audio_upload_changed() -> None:
+    f = st.session_state.get(_AUDIO_WIDGET_KEY)
+    if f is None:
+        st.session_state.pop(_AUDIO_SNAP_KEY, None)
+    else:
+        st.session_state[_AUDIO_SNAP_KEY] = {
+            "name": f.name,
+            "data": f.getvalue(),
+            "type": (f.type or "").strip() or "application/octet-stream",
+        }
+
+
 def _inject_layout_css() -> None:
     st.markdown(
         """
@@ -588,21 +607,27 @@ def main() -> None:
     with audio_panel:
         _card_title("Audio input")
         st.caption(
-            "Upload a file only for this path (not the text box above). "
-            "Recommended: MP3, WAV, OGG, M4A, AAC — max 5 minutes."
+            "Upload here first (not the text box above), then pick language in the next box and "
+            "**Run audio pipeline**. Recommended: MP3, WAV, OGG, M4A, AAC — max 5 minutes."
         )
-        # Form is only around audio widgets + submit so the file survives the submit rerun (HF / Streamlit).
+        st.markdown(
+            '<p class="sb-prompt">Audio file</p>',
+            unsafe_allow_html=True,
+        )
+        audio_file = st.file_uploader(
+            "Upload audio for transcription",
+            label_visibility="collapsed",
+            key=_AUDIO_WIDGET_KEY,
+            on_change=_pipeline_audio_upload_changed,
+        )
+        if audio_file is not None:
+            st.session_state[_AUDIO_SNAP_KEY] = {
+                "name": audio_file.name,
+                "data": audio_file.getvalue(),
+                "type": (audio_file.type or "").strip() or "application/octet-stream",
+            }
+        # Form only bundles language + submit (file uploader must stay outside the form).
         with st.form("audio_pipeline_form", clear_on_submit=False):
-            st.markdown(
-                '<p class="sb-prompt">Audio file</p>',
-                unsafe_allow_html=True,
-            )
-            audio_file = st.file_uploader(
-                "Upload audio for transcription",
-                type=None,
-                label_visibility="collapsed",
-                key="pipeline_audio_only",
-            )
             st.markdown(
                 '<p class="sb-prompt">Target language</p>',
                 unsafe_allow_html=True,
@@ -690,8 +715,19 @@ def main() -> None:
         st.rerun()
 
     elif submitted_audio:
-        if audio_file is None:
-            st.warning("Please choose an audio file in **Audio input**, then press **Run audio pipeline**.")
+        snap = st.session_state.get(_AUDIO_SNAP_KEY)
+        if audio_file is not None:
+            audio_tuple = (
+                audio_file.name,
+                audio_file.getvalue(),
+                (audio_file.type or "").strip() or "application/octet-stream",
+            )
+        elif isinstance(snap, dict) and snap.get("data"):
+            audio_tuple = (str(snap["name"]), snap["data"], str(snap.get("type") or "application/octet-stream"))
+        else:
+            st.warning(
+                "Please choose an audio file in **Audio input** (above), then press **Run audio pipeline**."
+            )
             return
 
         st.session_state["last_pipeline_error"] = None
@@ -704,11 +740,7 @@ def main() -> None:
                     backend,
                     target_language=target_lang_audio,
                     text=None,
-                    audio=(
-                        audio_file.name,
-                        audio_file.getvalue(),
-                        audio_file.type or "application/octet-stream",
-                    ),
+                    audio=audio_tuple,
                 )
             except requests.RequestException as exc:
                 st.session_state["last_pipeline_result"] = None

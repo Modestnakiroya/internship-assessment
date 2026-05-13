@@ -7,3 +7,5 @@ font = "sans serif"
 
 [server]
 headless = true
+# WhatsApp / long clips: avoid Streamlit rejecting uploads (red row) on Spaces (value is MB).
+maxUploadSize = 500
