@@ -191,8 +191,15 @@ async def pipeline(
                 audio=None,
                 target_language=target_language,
             )
+    except HTTPException:
+        raise
     except SunbirdAPIError as exc:
         raise _handle_sunbird(exc) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected pipeline error ({type(exc).__name__}): {exc}",
+        ) from exc
     return result
 
 

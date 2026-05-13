@@ -17,6 +17,25 @@ class SunbirdAPIError(Exception):
     """Raised when the Sunbird API returns an unexpected or error payload."""
 
 
+def _response_json(resp: requests.Response) -> Any:
+    """Parse JSON from a successful Sunbird response; raise SunbirdAPIError on garbage."""
+    try:
+        return resp.json()
+    except ValueError as exc:
+        snippet = (resp.text or "")[:800]
+        raise SunbirdAPIError(
+            f"Sunbird API returned non-JSON (HTTP {resp.status_code}). "
+            f"Body starts with: {snippet!r}"
+        ) from exc
+
+
+def _post(url: str, **kwargs: Any) -> requests.Response:
+    try:
+        return requests.post(url, **kwargs)
+    except requests.RequestException as exc:
+        raise SunbirdAPIError(f"Network error calling Sunbird API: {exc}") from exc
+
+
 class SunbirdClient:
     BASE = "https://api.sunbird.ai"
 
@@ -54,7 +73,7 @@ class SunbirdClient:
             "recognise_speakers": "false",
             "whisper": "false",
         }
-        resp = requests.post(
+        resp = _post(
             url,
             headers=self._headers_auth_only(),
             files=files,
@@ -62,7 +81,7 @@ class SunbirdClient:
             timeout=300,
         )
         self._raise_for_bad_response(resp)
-        payload = resp.json()
+        payload = _response_json(resp)
         text = _extract_stt_text(payload)
         if not text:
             raise SunbirdAPIError(f"No transcription in API response: {payload!r}")
@@ -85,14 +104,14 @@ class SunbirdClient:
         tgt = LANGUAGE_CODE_BY_NAME[target_language_name]
         src = LANGUAGE_CODE_BY_NAME["English"]
         url = f"{self.BASE}/tasks/nllb_translate"
-        resp = requests.post(
+        resp = _post(
             url,
             json={"text": text, "source_language": src, "target_language": tgt},
             headers=self._headers_json(),
             timeout=120,
         )
         self._raise_for_bad_response(resp)
-        data = resp.json()
+        data = _response_json(resp)
         status = str(data.get("status", "")).lower()
         output = data.get("output") or {}
         err = output.get("Error")
@@ -117,16 +136,16 @@ class SunbirdClient:
     def synthesise(self, text: str, speaker_id: int) -> Dict[str, Any]:
         """POST /tasks/tts — returns dict including audio_url."""
         url = f"{self.BASE}/tasks/tts"
-        resp = requests.post(
+        resp = _post(
             url,
             json={"text": text, "speaker_id": speaker_id, "temperature": 0.6},
             headers=self._headers_json(),
             timeout=180,
         )
         self._raise_for_bad_response(resp)
-        data = resp.json()
+        data = _response_json(resp)
         out = data.get("output") or {}
-        audio_url = out.get("audio_url")
+        audio_url = out.get("audio_url") or data.get("audio_url")
         if not audio_url:
             raise SunbirdAPIError(f"No audio_url in TTS response: {data!r}")
         return {
@@ -138,7 +157,7 @@ class SunbirdClient:
 
     def _sunflower_simple(self, instruction: str) -> str:
         url = f"{self.BASE}/tasks/sunflower_simple"
-        resp = requests.post(
+        resp = _post(
             url,
             data={
                 "instruction": instruction,
@@ -149,10 +168,13 @@ class SunbirdClient:
             timeout=180,
         )
         self._raise_for_bad_response(resp)
-        data = resp.json()
+        data = _response_json(resp)
         if data.get("success") is False:
             raise SunbirdAPIError(f"Sunflower inference failed: {data!r}")
         content = data.get("response")
+        if not content and isinstance(data.get("output"), dict):
+            out = data["output"]
+            content = out.get("response") or out.get("content") or out.get("text")
         if not content:
             raise SunbirdAPIError(f"No response field in Sunflower payload: {data!r}")
         return str(content).strip()

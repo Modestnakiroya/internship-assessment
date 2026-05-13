@@ -34,6 +34,8 @@ def _audio_duration_seconds(data: bytes, filename: str) -> float:
         path = Path(tmp.name)
     try:
         info = TinyTag.get(str(path))
+    except Exception as exc:
+        raise SunbirdAPIError(f"Could not read audio file for duration: {exc}") from exc
     finally:
         path.unlink(missing_ok=True)
     if info.duration is None:
