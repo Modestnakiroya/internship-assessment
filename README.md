@@ -1,3 +1,11 @@
+---
+title: Sunbird
+emoji: 🐦
+colorFrom: yellow
+colorTo: green
+sdk: docker
+pinned: false
+---
 # Sunbird AI internship assessment — GenAI pipeline app
 
 This project is a small **Streamlit + FastAPI** application that runs a fixed pipeline over **Sunbird AI** only: **Speech-to-Text (optional) → summarise → translate → Text-to-Speech**. You can also call each step through separate REST endpoints for testing.
