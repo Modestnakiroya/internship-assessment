@@ -5,7 +5,7 @@ Thin HTTP client for Sunbird AI tasks used by the assessment pipeline.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 from dotenv import load_dotenv
@@ -88,14 +88,19 @@ class SunbirdClient:
         return text
 
     def summarise(self, text: str) -> str:
-        """Summarise via Sunflower simple (English summary)."""
-        instruction = (
-            "Summarize the following text in clear, concise English "
-            "(2 to 5 sentences). Do not add a title or preamble. "
-            "Output only the summary.\n\n"
-            f"{text}"
-        )
-        return self._sunflower_simple(instruction)
+        """Summarise via Sunflower chat inference (JSON API)."""
+        messages: List[Dict[str, str]] = [
+            {
+                "role": "system",
+                "content": (
+                    "Summarize the user's text in clear, concise English "
+                    "(2 to 5 sentences). Do not add a title or preamble. "
+                    "Output only the summary."
+                ),
+            },
+            {"role": "user", "content": text},
+        ]
+        return self._sunflower_inference(messages, temperature=0.25)
 
     def translate_to_ugandan(self, text: str, target_language_name: str) -> str:
         """Translate English text into a Ugandan language using NLLB."""
@@ -125,13 +130,17 @@ class SunbirdClient:
         return str(translated)
 
     def translate_freeform(self, text: str, target_language_name: str) -> str:
-        """Translate arbitrary text to a target language (Sunflower)."""
-        instruction = (
+        """Translate arbitrary text to a target language (Sunflower chat inference)."""
+        user = (
             f"Translate the following text into {target_language_name}. "
             f"Reply with only the translated text — no notes, labels, or quotes.\n\n"
             f"{text}"
         )
-        return self._sunflower_simple(instruction)
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": "You are a professional translator."},
+            {"role": "user", "content": user},
+        ]
+        return self._sunflower_inference(messages, temperature=0.2)
 
     def synthesise(self, text: str, speaker_id: int) -> Dict[str, Any]:
         """POST /tasks/tts — returns dict including audio_url."""
@@ -155,28 +164,23 @@ class SunbirdClient:
             "duration_seconds": out.get("duration_seconds"),
         }
 
-    def _sunflower_simple(self, instruction: str) -> str:
-        url = f"{self.BASE}/tasks/sunflower_simple"
-        resp = _post(
-            url,
-            data={
-                "instruction": instruction,
-                "model_type": "qwen",
-                "temperature": "0.25",
-            },
-            headers=self._headers_auth_only(),
-            timeout=180,
-        )
+    def _sunflower_inference(self, messages: List[Dict[str, str]], *, temperature: float) -> str:
+        """POST /tasks/sunflower_inference — JSON chat completions (replaces deprecated form-only simple)."""
+        url = f"{self.BASE}/tasks/sunflower_inference"
+        payload: Dict[str, Any] = {
+            "messages": messages,
+            "model_type": "qwen",
+            "temperature": temperature,
+            "stream": False,
+        }
+        resp = _post(url, json=payload, headers=self._headers_json(), timeout=180)
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
-        if data.get("success") is False:
-            raise SunbirdAPIError(f"Sunflower inference failed: {data!r}")
-        content = data.get("response")
+        content = data.get("content")
         if not content and isinstance(data.get("output"), dict):
-            out = data["output"]
-            content = out.get("response") or out.get("content") or out.get("text")
+            content = data["output"].get("content")
         if not content:
-            raise SunbirdAPIError(f"No response field in Sunflower payload: {data!r}")
+            raise SunbirdAPIError(f"No content in Sunflower inference response: {data!r}")
         return str(content).strip()
 
     @staticmethod

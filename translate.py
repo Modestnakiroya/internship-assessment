@@ -18,7 +18,7 @@ from languages import LANGUAGE_CODE_BY_NAME, SUPPORTED_LANGUAGES
 
 API_BASE = "https://api.sunbird.ai"
 NLLB_URL = f"{API_BASE}/tasks/nllb_translate"
-SUNFLOWER_SIMPLE_URL = f"{API_BASE}/tasks/sunflower_simple"
+SUNFLOWER_INFERENCE_URL = f"{API_BASE}/tasks/sunflower_inference"
 
 
 def _load_token() -> str:
@@ -92,36 +92,39 @@ def _translate_nllb(
 def _translate_sunflower(
     token: str, text: str, source_name: str, target_name: str
 ) -> str:
-    instruction = (
-        f"You are a professional translator. Translate the following text "
-        f"from {source_name} to {target_name}. "
+    user = (
+        f"Translate the following text from {source_name} to {target_name}. "
         f"Reply with only the translated text — no explanations, labels, or quotes.\n\n"
         f"{text}"
     )
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    payload = {
+        "messages": [
+            {"role": "system", "content": "You are a professional translator."},
+            {"role": "user", "content": user},
+        ],
+        "model_type": "qwen",
+        "temperature": 0.2,
+        "stream": False,
+    }
     resp = requests.post(
-        SUNFLOWER_SIMPLE_URL,
-        data={
-            "instruction": instruction,
-            "model_type": "qwen",
-            "temperature": "0.2",
-        },
-        headers=_auth_headers(token),
+        SUNFLOWER_INFERENCE_URL,
+        json=payload,
+        headers=headers,
         timeout=180,
     )
     if not resp.ok:
         _print_http_error("Translation (Sunflower)", resp)
         sys.exit(1)
     data = resp.json()
-    if data.get("success") is False:
-        print("Translation failed (Sunflower).", file=sys.stderr)
+    content = data.get("content")
+    if not content and isinstance(data.get("output"), dict):
+        content = data["output"].get("content")
+    if not content:
+        print("Unexpected API response (no content).", file=sys.stderr)
         print(data, file=sys.stderr)
         sys.exit(1)
-    out = data.get("response")
-    if not out:
-        print("Unexpected API response (no response field).", file=sys.stderr)
-        print(data, file=sys.stderr)
-        sys.exit(1)
-    return str(out).strip()
+    return str(content).strip()
 
 
 def _print_http_error(context: str, resp: requests.Response) -> None:
