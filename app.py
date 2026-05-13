@@ -19,6 +19,11 @@ from languages import PIPELINE_TARGET_LANGUAGES
 
 load_dotenv()
 
+# One pipeline call can exceed 10 minutes (e.g. long audio + several Sunbird steps).
+# Default 30 minutes so non-default languages are not cut off by the browser client.
+_raw_to = (os.environ.get("PIPELINE_HTTP_TIMEOUT") or "").strip()
+_PIPELINE_HTTP_TIMEOUT_S = int(_raw_to) if _raw_to else 1800
+
 STEP_LABELS = ("Input", "Transcribe", "Summarise", "Translate", "Speech")
 
 
@@ -69,13 +74,13 @@ def post_pipeline(
             "target_language": (None, target_language),
             "audio": (name, raw, mime or "application/octet-stream"),
         }
-        return requests.post(url, files=files, timeout=600)
+        return requests.post(url, files=files, timeout=_PIPELINE_HTTP_TIMEOUT_S)
 
     files = {
         "target_language": (None, target_language),
         "text": (None, (text or "").strip()),
     }
-    return requests.post(url, files=files, timeout=600)
+    return requests.post(url, files=files, timeout=_PIPELINE_HTTP_TIMEOUT_S)
 
 
 def _inject_layout_css() -> None:
@@ -377,7 +382,7 @@ def main() -> None:
         ):
             st.info(
                 "Fill in the **Input** section above, then press **Run pipeline**. "
-                "Ensure the FastAPI server is running (`uvicorn backend.main:app --port 8000`)."
+            
             )
 
         if st.session_state.get("last_pipeline_error"):

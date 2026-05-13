@@ -31,6 +31,8 @@ def _response_json(resp: requests.Response) -> Any:
 
 # Very long inputs slow Sunflower more than they help the pipeline; cap for latency.
 _SUMMARY_INPUT_SOFT_CAP = 12_000
+# Modal TTS schema maxLength is 10_000; stay under to avoid errors / stuck jobs.
+_TTS_TEXT_MAX_CHARS = 9_800
 
 
 class SunbirdClient:
@@ -114,7 +116,7 @@ class SunbirdClient:
             url,
             json={"text": text, "source_language": src, "target_language": tgt},
             headers=self._headers_json(),
-            timeout=120,
+            timeout=240,
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
@@ -148,20 +150,57 @@ class SunbirdClient:
         return self._sunflower_inference(messages, temperature=0.15)
 
     def synthesise(self, text: str, speaker_id: int) -> Dict[str, Any]:
+        """
+        Prefer Modal TTS; on timeout or transient server errors fall back to legacy /tasks/tts
+        (some voices are slower or less reliable on Modal for the same speaker_id).
+        """
+        payload_text = (text or "").strip()
+        if len(payload_text) > _TTS_TEXT_MAX_CHARS:
+            payload_text = payload_text[:_TTS_TEXT_MAX_CHARS].rsplit(" ", 1)[0] + " …"
+        try:
+            return self._synthesise_modal_tts(payload_text, speaker_id)
+        except SunbirdAPIError as exc:
+            es = str(exc).lower()
+            if any(
+                x in es
+                for x in (
+                    "timeout",
+                    "timed out",
+                    "502",
+                    "503",
+                    "504",
+                    "500",
+                    "522",
+                    "connection aborted",
+                    "connection reset",
+                    "no audio_url",
+                )
+            ):
+                try:
+                    return self._synthesise_legacy_tts(payload_text, speaker_id)
+                except SunbirdAPIError as legacy_exc:
+                    raise SunbirdAPIError(
+                        f"TTS failed on Modal ({exc}); legacy /tasks/tts also failed ({legacy_exc})."
+                    ) from legacy_exc
+            raise
+
+    def _synthesise_modal_tts(self, payload_text: str, speaker_id: int) -> Dict[str, Any]:
         """POST /tasks/modal/tts — signed URL mode (Sunbird docs)."""
         url = f"{self.BASE}/tasks/modal/tts"
         resp = self._post(
             url,
             json={
-                "text": text,
+                "text": payload_text,
                 "speaker_id": speaker_id,
                 "response_mode": "url",
             },
             headers=self._headers_json(),
-            timeout=180,
+            timeout=300,
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
+        if data.get("success") is False:
+            return self._synthesise_legacy_tts(payload_text, speaker_id)
         out = data.get("output") if isinstance(data.get("output"), dict) else {}
         audio_url = data.get("audio_url") or out.get("audio_url")
         if not audio_url:
@@ -171,6 +210,28 @@ class SunbirdClient:
             "sample_rate": out.get("sample_rate"),
             "format": out.get("format", "wav"),
             "duration_seconds": out.get("duration_seconds") or data.get("duration_estimate_seconds"),
+        }
+
+    def _synthesise_legacy_tts(self, payload_text: str, speaker_id: int) -> Dict[str, Any]:
+        """POST /tasks/tts — fallback when Modal TTS errors or times out."""
+        url = f"{self.BASE}/tasks/tts"
+        resp = self._post(
+            url,
+            json={"text": payload_text, "speaker_id": speaker_id},
+            headers=self._headers_json(),
+            timeout=300,
+        )
+        self._raise_for_bad_response(resp)
+        data = _response_json(resp)
+        out = data.get("output") if isinstance(data.get("output"), dict) else {}
+        audio_url = data.get("audio_url") or out.get("audio_url")
+        if not audio_url:
+            raise SunbirdAPIError(f"No audio_url in legacy TTS response: {data!r}")
+        return {
+            "audio_url": audio_url,
+            "sample_rate": out.get("sample_rate"),
+            "format": out.get("format", "mp3"),
+            "duration_seconds": out.get("duration_seconds"),
         }
 
     def _sunflower_inference(self, messages: List[Dict[str, str]], *, temperature: float) -> str:
