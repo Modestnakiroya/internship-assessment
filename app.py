@@ -552,29 +552,35 @@ def main() -> None:
 
     with input_panel:
         _card_title("Input")
-        mode = st.radio(
-            "How would you like to provide content?",
-            ["Text", "Audio"],
-            horizontal=True,
-            key="input_mode",
-        )
-
-        target_language = "Luganda"
-        text_value = ""
-        uploaded = None
-
-        if mode == "Audio":
-            st.markdown(
-                '<p class="sb-prompt">Upload your audio file</p>',
-                unsafe_allow_html=True,
+        # Form keeps file_uploader value on submit (fixes HF/Streamlit losing the file when a
+        # standalone button triggers a rerun before the upload widget state is applied).
+        with st.form("sunbird_pipeline_form", clear_on_submit=False):
+            mode = st.radio(
+                "How would you like to provide content?",
+                ["Text", "Audio"],
+                horizontal=True,
+                key="input_mode",
             )
-            st.caption("Supported formats: MP3, WAV, OGG, M4A, AAC · Max length: 5 minutes")
-            uploaded = st.file_uploader(
-                "Audio upload",
-                type=["mp3", "wav", "ogg", "m4a", "aac"],
-                label_visibility="collapsed",
-            )
-            if uploaded is not None:
+
+            target_language = "Luganda"
+            text_value = ""
+            uploaded = None
+
+            if mode == "Audio":
+                st.markdown(
+                    '<p class="sb-prompt">Upload your audio file</p>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "Recommended: MP3, WAV, OGG, M4A, AAC (max 5 minutes). "
+                    "Other formats may still work — the server will reject unsupported audio."
+                )
+                uploaded = st.file_uploader(
+                    "Audio upload",
+                    type=None,
+                    label_visibility="collapsed",
+                    key="pipeline_audio_upload",
+                )
                 st.markdown(
                     '<p class="sb-prompt">Target language</p>',
                     unsafe_allow_html=True,
@@ -584,28 +590,32 @@ def main() -> None:
                     PIPELINE_TARGET_LANGUAGES,
                     key="target_lang_audio",
                 )
-        else:
-            st.markdown(
-                '<p class="sb-prompt">Enter the text you would like to process</p>',
-                unsafe_allow_html=True,
-            )
-            text_value = st.text_area(
-                "Text",
-                height=200,
-                placeholder="Paste or type your text here…",
-                label_visibility="collapsed",
-            )
-            st.markdown(
-                '<p class="sb-prompt">Target language</p>',
-                unsafe_allow_html=True,
-            )
-            target_language = st.selectbox(
-                "Target language",
-                PIPELINE_TARGET_LANGUAGES,
-                key="target_lang_text",
-            )
+            else:
+                st.markdown(
+                    '<p class="sb-prompt">Enter the text you would like to process</p>',
+                    unsafe_allow_html=True,
+                )
+                text_value = st.text_area(
+                    "Text",
+                    height=200,
+                    placeholder="Paste or type your text here…",
+                    label_visibility="collapsed",
+                )
+                st.markdown(
+                    '<p class="sb-prompt">Target language</p>',
+                    unsafe_allow_html=True,
+                )
+                target_language = st.selectbox(
+                    "Target language",
+                    PIPELINE_TARGET_LANGUAGES,
+                    key="target_lang_text",
+                )
 
-        run = st.button("Run pipeline", type="primary", use_container_width=True)
+            submitted = st.form_submit_button(
+                "Run pipeline",
+                type="primary",
+                use_container_width=True,
+            )
 
     try:
         results_panel = st.container(border=True)
@@ -634,11 +644,8 @@ def main() -> None:
                 float(stored.get("elapsed_s", 0)),
             )
 
-    if not run:
+    if not submitted:
         return
-
-    st.session_state["last_pipeline_error"] = None
-    st.session_state["last_pipeline_result"] = None
 
     if mode == "Text" and not text_value.strip():
         st.warning("Please enter some text before running the pipeline.")
@@ -646,6 +653,9 @@ def main() -> None:
     if mode == "Audio" and uploaded is None:
         st.warning("Please upload an audio file before running the pipeline.")
         return
+
+    st.session_state["last_pipeline_error"] = None
+    st.session_state["last_pipeline_result"] = None
 
     t0 = time.perf_counter()
     with st.spinner("Processing… transcription can take a moment"):
