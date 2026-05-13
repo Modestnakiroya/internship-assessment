@@ -116,17 +116,17 @@ class SunbirdClient:
         err = output.get("Error") if output else None
         if err:
             raise SunbirdAPIError(str(err))
-        status = str(data.get("status") or "").lower()
-        if status and status not in ("success", "ok"):
-            raise SunbirdAPIError(f"Translation failed with status={data.get('status')!r}")
         translated = (
             (output.get("translated_text") if output else None)
             or data.get("translated_text")
             or data.get("translation")
         )
-        if not translated:
-            raise SunbirdAPIError(f"No translation text in response: {data!r}")
-        return str(translated)
+        if translated:
+            return str(translated).strip()
+        status = str(data.get("status") or "").lower()
+        if status in ("error", "failed", "failure"):
+            raise SunbirdAPIError(f"Translation failed with status={data.get('status')!r}")
+        raise SunbirdAPIError(f"No translation text in response: {data!r}")
 
     def translate_freeform(self, text: str, target_language_name: str) -> str:
         """Translate arbitrary text to a target language (Sunflower chat inference)."""

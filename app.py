@@ -165,7 +165,7 @@ def _format_error(resp: requests.Response) -> str:
         if resp.status_code == 405:
             msg += _format_error_405_hint(resp)
         if getattr(resp, "url", None):
-            msg += f"\n\n**Request URL:** `{resp.url}`"
+            msg += f"\n\n**Request URL:**\n{resp.url}"
         return msg
 
     detail = body.get("detail")
@@ -187,7 +187,7 @@ def _format_error(resp: requests.Response) -> str:
     if resp.status_code == 405:
         msg += _format_error_405_hint(resp)
     if getattr(resp, "url", None):
-        msg += f"\n\n**Request URL:** `{resp.url}`"
+        msg += f"\n\n**Request URL:**\n{resp.url}"
     return msg
 
 

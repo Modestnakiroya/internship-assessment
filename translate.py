@@ -70,23 +70,21 @@ def _translate_nllb(
         _print_http_error("Translation (NLLB)", resp)
         sys.exit(1)
     data = resp.json()
-    status = data.get("status")
     output = data.get("output") or {}
     err = output.get("Error")
-    if status and str(status).lower() != "success":
-        print(f"Translation failed: status={status!r}", file=sys.stderr)
-        if err:
-            print(err, file=sys.stderr)
-        sys.exit(1)
     if err:
         print(f"Translation error: {err}", file=sys.stderr)
         sys.exit(1)
     translated = output.get("translated_text") or data.get("translated_text") or data.get("translation")
-    if not translated:
-        print("Unexpected API response (no translation text).", file=sys.stderr)
-        print(data, file=sys.stderr)
+    if translated:
+        return str(translated).strip()
+    status = data.get("status")
+    if status and str(status).lower() in ("error", "failed", "failure"):
+        print(f"Translation failed: status={status!r}", file=sys.stderr)
         sys.exit(1)
-    return str(translated)
+    print("Unexpected API response (no translation text).", file=sys.stderr)
+    print(data, file=sys.stderr)
+    sys.exit(1)
 
 
 def _translate_sunflower(
