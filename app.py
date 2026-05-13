@@ -565,84 +565,91 @@ def main() -> None:
     backend = _backend_url()
     _hero()
 
-    try:
-        text_panel = st.container(border=True)
-    except TypeError:
-        text_panel = st.container()
-
-    with text_panel:
-        _card_title("Text input")
-        st.caption("Paste or type content to summarise, translate, and synthesise.")
-        st.markdown(
-            '<p class="sb-prompt">Your text</p>',
-            unsafe_allow_html=True,
-        )
-        text_value = st.text_area(
-            "Text",
-            height=200,
-            placeholder="Paste or type your text here…",
-            label_visibility="collapsed",
-            key="pipeline_text_body",
-        )
-        st.markdown(
-            '<p class="sb-prompt">Target language</p>',
-            unsafe_allow_html=True,
-        )
-        target_lang_text = st.selectbox(
-            "Target language (text)",
-            PIPELINE_TARGET_LANGUAGES,
-            key="target_lang_text",
-        )
-        run_text = st.button(
-            "Run text pipeline",
-            type="primary",
-            use_container_width=True,
-            key="run_text_pipeline",
-        )
+    run_text = False
+    submitted_audio = False
+    text_value = ""
+    audio_file = None
+    target_lang_text = "Luganda"
+    target_lang_audio = "Luganda"
 
     try:
-        audio_panel = st.container(border=True)
+        input_panel = st.container(border=True)
     except TypeError:
-        audio_panel = st.container()
+        input_panel = st.container()
 
-    with audio_panel:
-        _card_title("Audio input")
-        st.caption(
-            "Upload here first (not the text box above), then pick language in the next box and "
-            "**Run audio pipeline**. Recommended: MP3, WAV, OGG, M4A, AAC — max 5 minutes."
+    with input_panel:
+        _card_title("Input")
+        mode = st.radio(
+            "How would you like to provide content?",
+            ["Text", "Audio"],
+            horizontal=True,
+            key="input_mode",
         )
-        st.markdown(
-            '<p class="sb-prompt">Audio file</p>',
-            unsafe_allow_html=True,
-        )
-        audio_file = st.file_uploader(
-            "Upload audio for transcription",
-            label_visibility="collapsed",
-            key=_AUDIO_WIDGET_KEY,
-            on_change=_pipeline_audio_upload_changed,
-        )
-        if audio_file is not None:
-            st.session_state[_AUDIO_SNAP_KEY] = {
-                "name": audio_file.name,
-                "data": audio_file.getvalue(),
-                "type": (audio_file.type or "").strip() or "application/octet-stream",
-            }
-        # Form only bundles language + submit (file uploader must stay outside the form).
-        with st.form("audio_pipeline_form", clear_on_submit=False):
+
+        if mode == "Text":
+            st.markdown(
+                '<p class="sb-prompt">Enter the text you would like to process</p>',
+                unsafe_allow_html=True,
+            )
+            text_value = st.text_area(
+                "Text",
+                height=200,
+                placeholder="Paste or type your text here…",
+                label_visibility="collapsed",
+                key="pipeline_text_body",
+            )
             st.markdown(
                 '<p class="sb-prompt">Target language</p>',
                 unsafe_allow_html=True,
             )
-            target_lang_audio = st.selectbox(
-                "Target language (audio)",
+            target_lang_text = st.selectbox(
+                "Target language",
                 PIPELINE_TARGET_LANGUAGES,
-                key="target_lang_audio",
+                key="target_lang_text",
             )
-            submitted_audio = st.form_submit_button(
-                "Run audio pipeline",
+            run_text = st.button(
+                "Run pipeline",
                 type="primary",
                 use_container_width=True,
+                key="run_pipeline_text",
             )
+        else:
+            st.caption(
+                "Supported formats: MP3, WAV, OGG, M4A, AAC · Max length: 5 minutes. "
+                "Pick a file, choose the language in the box below, then **Run pipeline**."
+            )
+            st.markdown(
+                '<p class="sb-prompt">Upload your audio file</p>',
+                unsafe_allow_html=True,
+            )
+            audio_file = st.file_uploader(
+                "Audio file",
+                label_visibility="collapsed",
+                key=_AUDIO_WIDGET_KEY,
+                on_change=_pipeline_audio_upload_changed,
+            )
+            if audio_file is not None:
+                st.session_state[_AUDIO_SNAP_KEY] = {
+                    "name": audio_file.name,
+                    "data": audio_file.getvalue(),
+                    "type": (audio_file.type or "").strip() or "application/octet-stream",
+                }
+            # Language + submit stay in a form so the upload survives the submit rerun (HF / Streamlit).
+            with st.form("audio_pipeline_form", clear_on_submit=False):
+                st.markdown(
+                    '<p class="sb-prompt">Target language</p>',
+                    unsafe_allow_html=True,
+                )
+                target_lang_audio = st.selectbox(
+                    "Target language",
+                    PIPELINE_TARGET_LANGUAGES,
+                    key="target_lang_audio",
+                )
+                submitted_audio = st.form_submit_button(
+                    "Run pipeline",
+                    type="primary",
+                    use_container_width=True,
+                )
 
     try:
         results_panel = st.container(border=True)
@@ -656,8 +663,7 @@ def main() -> None:
             "last_pipeline_error"
         ):
             st.info(
-                "Use **Text input** and **Run text pipeline**, or **Audio input** and **Run audio pipeline** — "
-                "they are separate paths."
+                "Choose **Text** or **Audio**, fill in that section, then press **Run pipeline**."
             )
 
         if st.session_state.get("last_pipeline_error"):
@@ -672,9 +678,9 @@ def main() -> None:
                 float(stored.get("elapsed_s", 0)),
             )
 
-    if run_text:
+    if mode == "Text" and run_text:
         if not text_value.strip():
-            st.warning("Please enter some text before running the text pipeline.")
+            st.warning("Please enter some text before running the pipeline.")
             return
 
         st.session_state["last_pipeline_error"] = None
@@ -715,7 +721,7 @@ def main() -> None:
         st.session_state["last_pipeline_error"] = None
         st.rerun()
 
-    elif submitted_audio:
+    elif mode == "Audio" and submitted_audio:
         snap = st.session_state.get(_AUDIO_SNAP_KEY)
         if audio_file is not None:
             audio_tuple = (
@@ -727,7 +733,7 @@ def main() -> None:
             audio_tuple = (str(snap["name"]), snap["data"], str(snap.get("type") or "application/octet-stream"))
         else:
             st.warning(
-                "Please choose an audio file in **Audio input** (above), then press **Run audio pipeline**."
+                "Please upload an audio file above, then press **Run pipeline**."
             )
             return
 
