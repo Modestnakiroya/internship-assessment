@@ -29,11 +29,8 @@ def _response_json(resp: requests.Response) -> Any:
         ) from exc
 
 
-def _post(url: str, **kwargs: Any) -> requests.Response:
-    try:
-        return requests.post(url, **kwargs)
-    except requests.RequestException as exc:
-        raise SunbirdAPIError(f"Network error calling Sunbird API: {exc}") from exc
+# Very long inputs slow Sunflower more than they help the pipeline; cap for latency.
+_SUMMARY_INPUT_SOFT_CAP = 12_000
 
 
 class SunbirdClient:
@@ -46,6 +43,7 @@ class SunbirdClient:
             raise SunbirdAPIError(
                 "SUNBIRD_API_TOKEN is not set. Add it to your environment or .env file."
             )
+        self._session = requests.Session()
 
     def _headers_json(self) -> Dict[str, str]:
         return {
@@ -55,6 +53,12 @@ class SunbirdClient:
 
     def _headers_auth_only(self) -> Dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
+
+    def _post(self, url: str, **kwargs: Any) -> requests.Response:
+        try:
+            return self._session.post(url, **kwargs)
+        except requests.RequestException as exc:
+            raise SunbirdAPIError(f"Network error calling Sunbird API: {exc}") from exc
 
     def transcribe(
         self,
@@ -68,7 +72,7 @@ class SunbirdClient:
             "audio": (filename or "audio.mp3", audio_bytes, "application/octet-stream"),
         }
         data = {"language": language_code} if language_code else {}
-        resp = _post(
+        resp = self._post(
             url,
             headers=self._headers_auth_only(),
             files=files,
@@ -84,18 +88,20 @@ class SunbirdClient:
 
     def summarise(self, text: str) -> str:
         """Summarise via Sunflower chat inference (JSON API)."""
+        body = text.strip()
+        if len(body) > _SUMMARY_INPUT_SOFT_CAP:
+            body = body[:_SUMMARY_INPUT_SOFT_CAP].rsplit(" ", 1)[0] + " …"
         messages: List[Dict[str, str]] = [
             {
                 "role": "system",
                 "content": (
-                    "Summarize the user's text in clear, concise English "
-                    "(2 to 5 sentences). Do not add a title or preamble. "
-                    "Output only the summary."
+                    "Summarize in clear English in at most 3 short sentences. "
+                    "No title or preamble — summary text only."
                 ),
             },
-            {"role": "user", "content": text},
+            {"role": "user", "content": body},
         ]
-        return self._sunflower_inference(messages, temperature=0.25)
+        return self._sunflower_inference(messages, temperature=0.2)
 
     def translate_to_ugandan(self, text: str, target_language_name: str) -> str:
         """Translate English text into a Ugandan language using NLLB."""
@@ -104,7 +110,7 @@ class SunbirdClient:
         tgt = LANGUAGE_CODE_BY_NAME[target_language_name]
         src = LANGUAGE_CODE_BY_NAME["English"]
         url = f"{self.BASE}/tasks/translate"
-        resp = _post(
+        resp = self._post(
             url,
             json={"text": text, "source_language": src, "target_language": tgt},
             headers=self._headers_json(),
@@ -139,12 +145,12 @@ class SunbirdClient:
             {"role": "system", "content": "You are a professional translator."},
             {"role": "user", "content": user},
         ]
-        return self._sunflower_inference(messages, temperature=0.2)
+        return self._sunflower_inference(messages, temperature=0.15)
 
     def synthesise(self, text: str, speaker_id: int) -> Dict[str, Any]:
         """POST /tasks/modal/tts — signed URL mode (Sunbird docs)."""
         url = f"{self.BASE}/tasks/modal/tts"
-        resp = _post(
+        resp = self._post(
             url,
             json={
                 "text": text,
@@ -176,7 +182,7 @@ class SunbirdClient:
             "temperature": temperature,
             "stream": False,
         }
-        resp = _post(url, json=payload, headers=self._headers_json(), timeout=180)
+        resp = self._post(url, json=payload, headers=self._headers_json(), timeout=180)
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
         content = data.get("content")
