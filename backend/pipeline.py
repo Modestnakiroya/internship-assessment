@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Tuple
 from tinytag import TinyTag
 
 from backend.sunbird_client import SunbirdAPIError, SunbirdClient
-from languages import LANGUAGE_CODE_BY_NAME, UGANDAN_TARGET_LANGUAGES
+from languages import LANGUAGE_CODE_BY_NAME, PIPELINE_TARGET_LANGUAGES
 
 MAX_AUDIO_SECONDS = 5 * 60
 
@@ -22,6 +22,8 @@ SPEAKER_ID_BY_LANGUAGE: Dict[str, int] = {
     "Runyankole": 243,
     "Lugbara": 245,
     "Luganda": 248,
+    # English: use default Sunbird TTS voice (reads Latin/English text; same default as docs)
+    "English": 248,
 }
 
 
@@ -40,10 +42,10 @@ def _audio_duration_seconds(data: bytes, filename: str) -> float:
 
 
 def _validate_target_language(name: str) -> None:
-    if name not in UGANDAN_TARGET_LANGUAGES:
+    if name not in PIPELINE_TARGET_LANGUAGES:
         raise SunbirdAPIError(
             f"Invalid target_language {name!r}. "
-            f"Expected one of: {', '.join(UGANDAN_TARGET_LANGUAGES)}."
+            f"Expected one of: {', '.join(PIPELINE_TARGET_LANGUAGES)}."
         )
 
 
@@ -82,7 +84,10 @@ def run_pipeline(
         source_text = str(text).strip()
 
     summary = client.summarise(source_text)
-    translated = client.translate_to_ugandan(summary, target_language)
+    if target_language == "English":
+        translated = summary
+    else:
+        translated = client.translate_to_ugandan(summary, target_language)
     speaker_id = SPEAKER_ID_BY_LANGUAGE[target_language]
     tts = client.synthesise(translated, speaker_id=speaker_id)
 

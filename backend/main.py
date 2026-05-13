@@ -14,7 +14,7 @@ from tinytag import TinyTag
 
 from backend.pipeline import MAX_AUDIO_SECONDS, SPEAKER_ID_BY_LANGUAGE, run_pipeline
 from backend.sunbird_client import SunbirdAPIError, SunbirdClient
-from languages import UGANDAN_TARGET_LANGUAGES
+from languages import PIPELINE_TARGET_LANGUAGES
 
 app = FastAPI(title="Sunbird Internship Assessment API", version="1.0.0")
 
@@ -114,10 +114,10 @@ async def summarise(body: SummariseBody) -> dict:
 
 @app.post("/translate")
 async def translate(body: TranslateBody) -> dict:
-    if body.target_language not in UGANDAN_TARGET_LANGUAGES:
+    if body.target_language not in PIPELINE_TARGET_LANGUAGES:
         raise HTTPException(
             status_code=400,
-            detail=f"target_language must be one of: {', '.join(UGANDAN_TARGET_LANGUAGES)}.",
+            detail=f"target_language must be one of: {', '.join(PIPELINE_TARGET_LANGUAGES)}.",
         )
     try:
         client = _client()
@@ -148,10 +148,10 @@ async def pipeline(
     text: str | None = Form(None),
     audio: UploadFile | None = File(None),
 ) -> dict:
-    if target_language not in UGANDAN_TARGET_LANGUAGES:
+    if target_language not in PIPELINE_TARGET_LANGUAGES:
         raise HTTPException(
             status_code=400,
-            detail=f"target_language must be one of: {', '.join(UGANDAN_TARGET_LANGUAGES)}.",
+            detail=f"target_language must be one of: {', '.join(PIPELINE_TARGET_LANGUAGES)}.",
         )
 
     raw_text = (text or "").strip()
@@ -164,15 +164,6 @@ async def pipeline(
             raise HTTPException(status_code=400, detail="Empty audio upload.")
 
     if raw_text and audio_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either text or audio, not both.",
-        )
-    if not raw_text and not audio_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either text or audio.",
-        )
         raise HTTPException(
             status_code=400,
             detail="Provide either text or audio, not both.",

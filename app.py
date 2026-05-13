@@ -14,18 +14,89 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
-from languages import UGANDAN_TARGET_LANGUAGES
+from languages import PIPELINE_TARGET_LANGUAGES
 
 load_dotenv()
 
+STEP_LABELS = ("Input", "Transcribe", "Summarise", "Translate", "Speech")
 
-def _page_shell() -> None:
+
+def _backend_url() -> str:
+    return os.environ.get("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+
+
+def _inject_layout_css() -> None:
     st.markdown(
         """
         <style>
-        .block-container {
-            padding-top: 1.25rem;
-        }
+          /* Hide sidebar completely */
+          section[data-testid="stSidebar"],
+          div[data-testid="stSidebar"] {
+            display: none !important;
+            width: 0 !important;
+          }
+          div[data-testid="stSidebarCollapsedControl"],
+          button[data-testid="collapsedControl"] {
+            display: none !important;
+          }
+          header[data-testid="stHeader"] {
+            background: linear-gradient(90deg, #0f766e 0%, #0d9488 55%, #14b8a6 100%);
+          }
+          .block-container {
+            max-width: 880px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding-top: 1.5rem !important;
+            padding-bottom: 2.5rem !important;
+          }
+          .sb-hero {
+            text-align: center;
+            padding: 1.25rem 0 0.5rem 0;
+          }
+          .sb-hero h1 {
+            font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: #0f172a;
+            margin-bottom: 0.35rem;
+          }
+          .sb-hero p {
+            color: #475569;
+            font-size: 1.05rem;
+            line-height: 1.55;
+            max-width: 38rem;
+            margin: 0 auto;
+          }
+          .sb-brand {
+            display: inline-block;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #0d9488;
+            margin-bottom: 0.35rem;
+          }
+          .sb-card-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #0f766e;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 0.75rem;
+          }
+          .sb-prompt {
+            font-size: 1rem;
+            color: #0f172a;
+            margin: 0.75rem 0 0.5rem 0;
+            font-weight: 500;
+          }
+          .sb-step-out {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #0f766e;
+            margin-top: 1.1rem;
+            margin-bottom: 0.35rem;
+          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -53,182 +124,177 @@ def _format_error(resp: requests.Response) -> str:
     return str(body)
 
 
-def _default_backend() -> str:
-    return os.environ.get("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-
-
-def _sidebar_connection() -> str:
-    st.sidebar.header("Connection")
-    if "backend_url" not in st.session_state:
-        st.session_state.backend_url = _default_backend()
-
-    backend = st.sidebar.text_input(
-        "Backend base URL",
-        value=st.session_state.backend_url,
-        help="FastAPI root, e.g. http://127.0.0.1:8000 when running locally.",
-    ).strip().rstrip("/")
-    st.session_state.backend_url = backend or _default_backend()
-
-    b = st.session_state.backend_url
-    cols = st.sidebar.columns(2)
-    with cols[0]:
-        if st.button("Ping /health", use_container_width=True):
-            try:
-                r = requests.get(f"{b}/health", timeout=5)
-                if r.ok:
-                    st.session_state["health_ok"] = True
-                    st.session_state["health_msg"] = r.text
-                else:
-                    st.session_state["health_ok"] = False
-                    st.session_state["health_msg"] = _format_error(r)
-            except requests.RequestException as exc:
-                st.session_state["health_ok"] = False
-                st.session_state["health_msg"] = str(exc)
-
-    with cols[1]:
-        if hasattr(st, "link_button"):
-            st.link_button("OpenAPI docs", f"{b}/docs", use_container_width=True)
-        else:
-            st.markdown(f"[OpenAPI docs]({b}/docs)")
-
-    if "health_ok" in st.session_state:
-        if st.session_state["health_ok"]:
-            st.sidebar.success("API reachable")
-        else:
-            st.sidebar.error(st.session_state.get("health_msg", "Unreachable"))
-
-    st.sidebar.divider()
-    st.sidebar.subheader("About this UI")
-    st.sidebar.markdown(
-        "**Pipeline:** optional STT → English summary → translate → TTS. "
-        "Audio must be **≤ 5 minutes** (MP3, WAV, OGG, M4A, AAC)."
+def _hero() -> None:
+    st.markdown(
+        """
+        <div class="sb-hero">
+          <div class="sb-brand">Sunbird AI</div>
+          <h1>Language pipeline</h1>
+          <p>
+            Summarise your content in clear English, translate it into your chosen language,
+            and hear it spoken — powered by the Sunbird API through this assessment backend.
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.sidebar.caption("Powered by Sunbird AI via your FastAPI backend.")
-
-    if st.sidebar.button("Clear last run"):
-        for key in ("last_pipeline_result", "last_pipeline_error", "health_ok", "health_msg"):
-            st.session_state.pop(key, None)
-        st.rerun()
-
-    return st.session_state.backend_url
+    step_line = " → ".join(STEP_LABELS)
+    st.markdown(
+        f"<p style='text-align:center;color:#475569;font-size:0.92rem;margin:0.5rem 0 1.25rem 0;"
+        f"font-weight:500;letter-spacing:0.02em;'>{step_line}</p>",
+        unsafe_allow_html=True,
+    )
 
 
-def _render_results(
-    backend: str,
-    result: dict[str, Any],
-    elapsed_s: float,
+def _card_title(label: str) -> None:
+    st.markdown(f'<div class="sb-card-title">{label}</div>', unsafe_allow_html=True)
+
+
+def _render_output_steps(
     mode: str,
     target_language: str,
+    result: dict[str, Any],
+    elapsed_s: float,
 ) -> None:
-    st.divider()
-    top = st.columns(4)
-    top[0].metric("Total time", f"{elapsed_s:.1f}s")
-    top[1].metric("Target language", target_language or "—")
-    summary = result.get("summary") or ""
-    top[2].metric("Summary words", str(len(summary.split())) if summary else "0")
-    trans = result.get("translated_summary") or ""
-    top[3].metric("Translation words", str(len(trans.split())) if trans else "0")
+    st.markdown(
+        f'<p style="color:#64748b;font-size:0.9rem;margin:0 0 1rem 0;">'
+        f"Completed in <strong>{elapsed_s:.1f}s</strong> · target: <strong>{target_language}</strong></p>",
+        unsafe_allow_html=True,
+    )
 
-    tab1, tab2 = st.tabs(["Pipeline output", "Raw JSON"])
-    with tab1:
-        if mode == "Audio" and result.get("transcript"):
-            with st.expander("Transcript", expanded=True):
-                st.write(result["transcript"])
-        elif mode == "Audio":
-            with st.expander("Transcript", expanded=False):
-                st.caption("No transcript field returned (unexpected for audio input).")
-
-        with st.expander("Summary (English)", expanded=True):
-            st.write(result.get("summary", ""))
-
-        with st.expander("Translated summary", expanded=True):
-            st.write(result.get("translated_summary", ""))
-
-        audio_url = result.get("audio_url")
-        with st.expander("Synthesised speech", expanded=True):
-            if audio_url:
-                st.audio(audio_url)
-                st.caption(
-                    "Signed URL from Sunbird TTS — open or play promptly; it expires after a short time."
-                )
-            else:
-                st.warning("No audio URL returned.")
-
-        report = []
-        if mode == "Audio" and result.get("transcript"):
-            report.append("=== Transcript ===\n" + str(result["transcript"]))
-        report.append("=== Summary (English) ===\n" + str(result.get("summary", "")))
-        report.append("=== Translated summary ===\n" + str(result.get("translated_summary", "")))
-        report.append("=== Audio URL ===\n" + str(result.get("audio_url", "")))
-        payload = "\n\n".join(report)
-        st.download_button(
-            label="Download report (.txt)",
-            data=payload.encode("utf-8"),
-            file_name=f"sunbird_pipeline_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt",
-            mime="text/plain",
+    if mode == "Audio" and result.get("transcript"):
+        st.markdown(
+            f'<div class="sb-step-out">Audio transcription text in {target_language}:</div>',
+            unsafe_allow_html=True,
         )
+        st.write(result["transcript"])
+    elif mode == "Audio":
+        st.markdown(
+            '<div class="sb-step-out">Audio transcription</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("No transcript was returned for this audio.")
 
-    with tab2:
+    st.markdown('<div class="sb-step-out">Summary:</div>', unsafe_allow_html=True)
+    st.write(result.get("summary", ""))
+
+    st.markdown('<div class="sb-step-out">Translation:</div>', unsafe_allow_html=True)
+    st.write(result.get("translated_summary", ""))
+
+    st.markdown('<div class="sb-step-out">Speech output:</div>', unsafe_allow_html=True)
+    audio_url = result.get("audio_url")
+    if audio_url:
+        st.audio(audio_url)
+        st.caption("Signed audio URL from Sunbird TTS — play or download soon; it expires after a short time.")
+    else:
+        st.warning("No audio URL returned.")
+
+    report = []
+    if mode == "Audio" and result.get("transcript"):
+        report.append("=== Transcription ===\n" + str(result["transcript"]))
+    report.append("=== Summary ===\n" + str(result.get("summary", "")))
+    report.append("=== Translation ===\n" + str(result.get("translated_summary", "")))
+    report.append("=== Audio URL ===\n" + str(result.get("audio_url", "")))
+    payload = "\n\n".join(report)
+    st.download_button(
+        label="Download report (.txt)",
+        data=payload.encode("utf-8"),
+        file_name=f"sunbird_pipeline_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt",
+        mime="text/plain",
+    )
+
+    with st.expander("Raw JSON response"):
         st.json(result)
-
-    st.caption(f"Backend used: `{backend}`")
 
 
 def main() -> None:
     st.set_page_config(
-        page_title="Sunbird Pipeline",
-        layout="wide",
-        initial_sidebar_state="expanded",
+        page_title="Sunbird AI — Pipeline",
+        layout="centered",
+        initial_sidebar_state="collapsed",
     )
-    _page_shell()
+    _inject_layout_css()
 
-    backend = _sidebar_connection()
+    backend = _backend_url()
+    _hero()
 
-    st.title("Sunbird AI pipeline")
-    st.markdown(
-        "Run **text or audio** through **summarise → translate → speech**, "
-        "with intermediate steps visible below."
-    )
+    try:
+        input_panel = st.container(border=True)
+    except TypeError:
+        input_panel = st.container()
 
-    left, right = st.columns((1, 1.05), gap="large")
+    with input_panel:
+        _card_title("Input")
+        mode = st.radio(
+            "How would you like to provide content?",
+            ["Text", "Audio"],
+            horizontal=True,
+            key="input_mode",
+        )
 
-    with left:
-        try:
-            panel = st.container(border=True)
-        except TypeError:
-            panel = st.container()
-        with panel:
-            st.subheader("Input")
-            mode = st.radio("Input type", ["Text", "Audio"], horizontal=True, key="input_mode")
+        target_language = "Luganda"
+        text_value = ""
+        uploaded = None
+
+        if mode == "Audio":
+            st.markdown(
+                '<p class="sb-prompt">Please provide path to the audio file '
+                "(Audio length less than 5 minutes):</p>",
+                unsafe_allow_html=True,
+            )
+            st.caption("Upload your file below (browser security does not allow typing a disk path).")
+            uploaded = st.file_uploader(
+                "Audio upload",
+                type=["mp3", "wav", "ogg", "m4a", "aac"],
+                label_visibility="collapsed",
+            )
+            if uploaded is not None:
+                st.markdown(
+                    '<p class="sb-prompt">Please choose the target language:</p>',
+                    unsafe_allow_html=True,
+                )
+                target_language = st.selectbox(
+                    "Target language",
+                    PIPELINE_TARGET_LANGUAGES,
+                    key="target_lang_audio",
+                )
+        else:
+            st.markdown(
+                '<p class="sb-prompt">Please enter the text you would like to process:</p>',
+                unsafe_allow_html=True,
+            )
+            text_value = st.text_area(
+                "Text",
+                height=200,
+                placeholder="Paste or type your text here…",
+                label_visibility="collapsed",
+            )
+            st.markdown(
+                '<p class="sb-prompt">Please choose the target language:</p>',
+                unsafe_allow_html=True,
+            )
             target_language = st.selectbox(
-                "Target Ugandan language",
-                UGANDAN_TARGET_LANGUAGES,
-                help="Translation and TTS voice follow this choice.",
+                "Target language",
+                PIPELINE_TARGET_LANGUAGES,
+                key="target_lang_text",
             )
 
-            text_value = ""
-            uploaded = None
-            if mode == "Text":
-                text_value = st.text_area(
-                    "Text",
-                    height=220,
-                    placeholder="Paste or type the content you want summarised and translated…",
-                )
-            else:
-                uploaded = st.file_uploader(
-                    "Audio file (max 5 minutes)",
-                    type=["mp3", "wav", "ogg", "m4a", "aac"],
-                    help="Formats supported by the backend and Sunbird STT.",
-                )
+        run = st.button("Run pipeline", type="primary", use_container_width=True)
 
-            run = st.button("Run full pipeline", type="primary", use_container_width=True)
+    try:
+        results_panel = st.container(border=True)
+    except TypeError:
+        results_panel = st.container()
 
-    with right:
-        st.subheader("Results")
-        if not st.session_state.get("last_pipeline_result") and not st.session_state.get("last_pipeline_error"):
+    with results_panel:
+        _card_title("Results")
+
+        if not st.session_state.get("last_pipeline_result") and not st.session_state.get(
+            "last_pipeline_error"
+        ):
             st.info(
-                "Configure input on the left, then **Run full pipeline**. "
-                "Use **Ping /health** in the sidebar if the page cannot reach the API."
+                "Fill in the **Input** section above, then press **Run pipeline**. "
+                "Ensure the FastAPI server is running (`uvicorn backend.main:app --port 8000`)."
             )
 
         if st.session_state.get("last_pipeline_error"):
@@ -236,15 +302,11 @@ def main() -> None:
 
         stored = st.session_state.get("last_pipeline_result")
         if stored:
-            st.caption(
-                f"Last run: {stored.get('finished_at', '')} · mode: {stored.get('mode', '')}"
-            )
-            _render_results(
-                stored.get("backend", backend),
-                stored["result"],
-                float(stored.get("elapsed_s", 0)),
+            _render_output_steps(
                 str(stored.get("mode", "Text")),
                 str(stored.get("target_language", "")),
+                stored["result"],
+                float(stored.get("elapsed_s", 0)),
             )
 
     if not run:
@@ -254,10 +316,10 @@ def main() -> None:
     st.session_state["last_pipeline_result"] = None
 
     if mode == "Text" and not text_value.strip():
-        st.warning("Please enter some text before running.")
+        st.warning("Please enter some text before running the pipeline.")
         return
     if mode == "Audio" and uploaded is None:
-        st.warning("Please upload an audio file before running.")
+        st.warning("Please upload an audio file before running the pipeline.")
         return
 
     data = {"target_language": target_language}
@@ -275,7 +337,7 @@ def main() -> None:
         }
 
     t0 = time.perf_counter()
-    with st.spinner("Running pipeline on the server (STT may take a while)…"):
+    with st.spinner("Processing on the server… (transcription can take a while)"):
         try:
             resp = requests.post(
                 f"{backend}/pipeline",
@@ -285,12 +347,11 @@ def main() -> None:
             )
         except requests.RequestException as exc:
             st.session_state["last_pipeline_result"] = None
-            msg = (
-                f"Could not reach backend at `{backend}`: {exc}\n\n"
+            st.session_state["last_pipeline_error"] = (
+                f"Could not reach the backend at `{backend}`: {exc}\n\n"
                 "Start the API from the project root: "
                 "`uvicorn backend.main:app --reload --port 8000`"
             )
-            st.session_state["last_pipeline_error"] = msg
             st.rerun()
 
     elapsed = time.perf_counter() - t0
@@ -305,9 +366,7 @@ def main() -> None:
         "result": result,
         "elapsed_s": elapsed,
         "mode": mode,
-        "backend": backend,
         "target_language": target_language,
-        "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
     st.session_state["last_pipeline_error"] = None
     st.rerun()

@@ -32,3 +32,13 @@ UGANDAN_TARGET_LANGUAGES: List[str] = [
     "Lugbara",
     "Acholi",
 ]
+
+# Streamlit pipeline + API: Ugandan languages plus English output
+PIPELINE_TARGET_LANGUAGES: List[str] = [
+    "Luganda",
+    "Runyankole",
+    "Ateso",
+    "Lugbara",
+    "Acholi",
+    "English",
+]
