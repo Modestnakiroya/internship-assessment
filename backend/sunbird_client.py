@@ -62,17 +62,12 @@ class SunbirdClient:
         filename: str,
         language_code: str,
     ) -> str:
-        """POST /tasks/stt — multipart upload."""
-        url = f"{self.BASE}/tasks/stt"
+        """POST /tasks/modal/stt — Modal Whisper STT (recommended in Sunbird docs)."""
+        url = f"{self.BASE}/tasks/modal/stt"
         files = {
             "audio": (filename or "audio.mp3", audio_bytes, "application/octet-stream"),
         }
-        data = {
-            "language": language_code,
-            "adapter": language_code,
-            "recognise_speakers": "false",
-            "whisper": "false",
-        }
+        data = {"language": language_code} if language_code else {}
         resp = _post(
             url,
             headers=self._headers_auth_only(),
@@ -108,7 +103,7 @@ class SunbirdClient:
             raise SunbirdAPIError(f"Unsupported target language: {target_language_name!r}")
         tgt = LANGUAGE_CODE_BY_NAME[target_language_name]
         src = LANGUAGE_CODE_BY_NAME["English"]
-        url = f"{self.BASE}/tasks/nllb_translate"
+        url = f"{self.BASE}/tasks/translate"
         resp = _post(
             url,
             json={"text": text, "source_language": src, "target_language": tgt},
@@ -117,16 +112,20 @@ class SunbirdClient:
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
-        status = str(data.get("status", "")).lower()
-        output = data.get("output") or {}
-        err = output.get("Error")
+        output = data.get("output") if isinstance(data.get("output"), dict) else {}
+        err = output.get("Error") if output else None
         if err:
             raise SunbirdAPIError(str(err))
-        if status and status != "success":
+        status = str(data.get("status") or "").lower()
+        if status and status not in ("success", "ok"):
             raise SunbirdAPIError(f"Translation failed with status={data.get('status')!r}")
-        translated = output.get("translated_text")
+        translated = (
+            (output.get("translated_text") if output else None)
+            or data.get("translated_text")
+            or data.get("translation")
+        )
         if not translated:
-            raise SunbirdAPIError(f"No translated_text in response: {data!r}")
+            raise SunbirdAPIError(f"No translation text in response: {data!r}")
         return str(translated)
 
     def translate_freeform(self, text: str, target_language_name: str) -> str:
@@ -143,25 +142,29 @@ class SunbirdClient:
         return self._sunflower_inference(messages, temperature=0.2)
 
     def synthesise(self, text: str, speaker_id: int) -> Dict[str, Any]:
-        """POST /tasks/tts — returns dict including audio_url."""
-        url = f"{self.BASE}/tasks/tts"
+        """POST /tasks/modal/tts — signed URL mode (Sunbird docs)."""
+        url = f"{self.BASE}/tasks/modal/tts"
         resp = _post(
             url,
-            json={"text": text, "speaker_id": speaker_id, "temperature": 0.6},
+            json={
+                "text": text,
+                "speaker_id": speaker_id,
+                "response_mode": "url",
+            },
             headers=self._headers_json(),
             timeout=180,
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
-        out = data.get("output") or {}
-        audio_url = out.get("audio_url") or data.get("audio_url")
+        out = data.get("output") if isinstance(data.get("output"), dict) else {}
+        audio_url = data.get("audio_url") or out.get("audio_url")
         if not audio_url:
             raise SunbirdAPIError(f"No audio_url in TTS response: {data!r}")
         return {
             "audio_url": audio_url,
             "sample_rate": out.get("sample_rate"),
-            "format": out.get("format", "mp3"),
-            "duration_seconds": out.get("duration_seconds"),
+            "format": out.get("format", "wav"),
+            "duration_seconds": out.get("duration_seconds") or data.get("duration_estimate_seconds"),
         }
 
     def _sunflower_inference(self, messages: List[Dict[str, str]], *, temperature: float) -> str:

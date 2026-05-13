@@ -164,6 +164,8 @@ def _format_error(resp: requests.Response) -> str:
         msg = resp.text[:4000] or f"HTTP {resp.status_code}"
         if resp.status_code == 405:
             msg += _format_error_405_hint(resp)
+        if getattr(resp, "url", None):
+            msg += f"\n\n**Request URL:** `{resp.url}`"
         return msg
 
     detail = body.get("detail")
@@ -184,6 +186,8 @@ def _format_error(resp: requests.Response) -> str:
 
     if resp.status_code == 405:
         msg += _format_error_405_hint(resp)
+    if getattr(resp, "url", None):
+        msg += f"\n\n**Request URL:** `{resp.url}`"
     return msg
 
 
@@ -194,7 +198,9 @@ def _format_error_405_hint(resp: requests.Response) -> str:
         "Typical causes: (1) **`BACKEND_URL` is your public Hugging Face Space URL** (`https://*.hf.space`) — "
         "POST `/pipeline` then hits **Streamlit**, not FastAPI. Use **`http://127.0.0.1:8000`** inside the same "
         "container (see `start.sh`). (2) **`BACKEND_URL` points at Streamlit** (e.g. port **8501**) instead of "
-        "**uvicorn** on **8000**."
+        "**uvicorn** on **8000**. (3) **Stale deploy** — older builds called Sunbird legacy routes (`nllb_translate`, "
+        "`/tasks/tts`, RunPod-only STT); redeploy so the client uses `/tasks/translate`, `/tasks/modal/tts`, and "
+        "`/tasks/modal/stt`."
     )
     if allow:
         hint += f"\n\n`Allow` response header: `{allow}`"

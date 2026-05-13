@@ -18,7 +18,7 @@ from tinytag import TinyTag
 from languages import LANGUAGE_CODE_BY_NAME, SUPPORTED_LANGUAGES
 
 API_BASE = "https://api.sunbird.ai"
-STT_URL = f"{API_BASE}/tasks/stt"
+STT_URL = f"{API_BASE}/tasks/modal/stt"
 
 MAX_DURATION_SECONDS = 5 * 60
 
@@ -123,7 +123,7 @@ def main() -> None:
 
     with path.open("rb") as audio_fp:
         files = {"audio": (path.name, audio_fp, "application/octet-stream")}
-        data = {"language": code, "adapter": code}
+        data = {"language": code}
         resp = requests.post(
             STT_URL,
             headers=_auth_headers(token),

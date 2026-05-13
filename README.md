@@ -28,18 +28,18 @@ Users provide **either** pasted text **or** an audio file (up to **5 minutes**),
 
 - **`app.py`** — Streamlit UI: input mode (text vs audio), target language, calls `POST /pipeline`, shows transcript (if audio), summary, translated summary, and `st.audio` for the signed TTS URL. Surfaces API/validation errors with `st.error`.
 - **`backend/main.py`** — FastAPI routes: `/transcribe`, `/summarise`, `/translate`, `/synthesise`, `/pipeline`, plus `/health`.
-- **`backend/sunbird_client.py`** — HTTP wrappers: `POST /tasks/stt`, `POST /tasks/sunflower_inference` (summarise + free-form translate), `POST /tasks/nllb_translate` (pipeline translate from English summary), `POST /tasks/tts`.
+- **`backend/sunbird_client.py`** — HTTP wrappers: `POST /tasks/modal/stt`, `POST /tasks/sunflower_inference` (summarise + free-form translate), `POST /tasks/translate` (pipeline translate from English summary), `POST /tasks/modal/tts`.
 - **`backend/pipeline.py`** — Orchestrates the end-to-end flow and enforces the **5-minute** audio cap using `tinytag`.
 
 ### Pipeline mapping to Sunbird endpoints
 
 | Step | Sunbird endpoint |
 |------|------------------|
-| STT (audio only) | [`POST /tasks/stt`](https://docs.sunbird.ai/guides/speech-to-text) |
+| STT (audio only) | [`POST /tasks/modal/stt`](https://docs.sunbird.ai/guides/speech-to-text) |
 | Summarise | [`POST /tasks/sunflower_inference`](https://docs.sunbird.ai/api-reference/ai/sunflower-chat) |
-| Translate (inside `/pipeline`) | [`POST /tasks/nllb_translate`](https://docs.sunbird.ai/) (English summary → local language) |
+| Translate (inside `/pipeline`) | [`POST /tasks/translate`](https://github.com/SunbirdAI/sunbird-ai-api/blob/main/docs/tutorial.md) (English summary → local language) |
 | Standalone `/translate` | [`POST /tasks/sunflower_inference`](https://docs.sunbird.ai/api-reference/ai/sunflower-chat) (any source text → target language) |
-| TTS | [`POST /tasks/tts`](https://docs.sunbird.ai/guides/text-to-speech) |
+| TTS | [`POST /tasks/modal/tts`](https://docs.sunbird.ai/guides/text-to-speech) |
 
 ## Local setup
 

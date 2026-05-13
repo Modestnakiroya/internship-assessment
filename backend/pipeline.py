@@ -15,7 +15,7 @@ from languages import LANGUAGE_CODE_BY_NAME, PIPELINE_TARGET_LANGUAGES
 
 MAX_AUDIO_SECONDS = 5 * 60
 
-# POST /tasks/tts speaker IDs (Sunbird docs)
+# POST /tasks/modal/tts speaker IDs (Sunbird docs)
 SPEAKER_ID_BY_LANGUAGE: Dict[str, int] = {
     "Acholi": 241,
     "Ateso": 242,

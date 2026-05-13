@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from languages import LANGUAGE_CODE_BY_NAME, SUPPORTED_LANGUAGES
 
 API_BASE = "https://api.sunbird.ai"
-NLLB_URL = f"{API_BASE}/tasks/nllb_translate"
+TRANSLATE_URL = f"{API_BASE}/tasks/translate"
 SUNFLOWER_INFERENCE_URL = f"{API_BASE}/tasks/sunflower_inference"
 
 
@@ -57,7 +57,7 @@ def _translate_nllb(
 ) -> str:
     headers = {**_auth_headers(token), "Content-Type": "application/json"}
     resp = requests.post(
-        NLLB_URL,
+        TRANSLATE_URL,
         json={
             "text": text,
             "source_language": source_code,
@@ -81,9 +81,9 @@ def _translate_nllb(
     if err:
         print(f"Translation error: {err}", file=sys.stderr)
         sys.exit(1)
-    translated = output.get("translated_text")
+    translated = output.get("translated_text") or data.get("translated_text") or data.get("translation")
     if not translated:
-        print("Unexpected API response (no translated_text).", file=sys.stderr)
+        print("Unexpected API response (no translation text).", file=sys.stderr)
         print(data, file=sys.stderr)
         sys.exit(1)
     return str(translated)
