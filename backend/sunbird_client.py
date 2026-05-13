@@ -33,6 +33,10 @@ def _response_json(resp: requests.Response) -> Any:
 _SUMMARY_INPUT_SOFT_CAP = 12_000
 # Modal TTS schema maxLength is 10_000; stay under to avoid errors / stuck jobs.
 _TTS_TEXT_MAX_CHARS = 9_800
+# Modal STT can take several minutes on clips near the 5-minute audio cap (allow up to 10 min).
+_STT_HTTP_TIMEOUT_S = 600
+# Long transcripts from STT need a higher ceiling than short text-only summaries.
+_SUNFLOWER_HTTP_TIMEOUT_S = 360
 
 
 class SunbirdClient:
@@ -79,7 +83,7 @@ class SunbirdClient:
             headers=self._headers_auth_only(),
             files=files,
             data=data,
-            timeout=300,
+            timeout=_STT_HTTP_TIMEOUT_S,
         )
         self._raise_for_bad_response(resp)
         payload = _response_json(resp)
@@ -116,7 +120,7 @@ class SunbirdClient:
             url,
             json={"text": text, "source_language": src, "target_language": tgt},
             headers=self._headers_json(),
-            timeout=240,
+            timeout=300,
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
@@ -195,7 +199,7 @@ class SunbirdClient:
                 "response_mode": "url",
             },
             headers=self._headers_json(),
-            timeout=300,
+            timeout=360,
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
@@ -219,7 +223,7 @@ class SunbirdClient:
             url,
             json={"text": payload_text, "speaker_id": speaker_id},
             headers=self._headers_json(),
-            timeout=300,
+            timeout=360,
         )
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
@@ -243,7 +247,7 @@ class SunbirdClient:
             "temperature": temperature,
             "stream": False,
         }
-        resp = self._post(url, json=payload, headers=self._headers_json(), timeout=180)
+        resp = self._post(url, json=payload, headers=self._headers_json(), timeout=_SUNFLOWER_HTTP_TIMEOUT_S)
         self._raise_for_bad_response(resp)
         data = _response_json(resp)
         content = data.get("content")

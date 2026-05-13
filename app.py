@@ -20,7 +20,8 @@ from languages import PIPELINE_TARGET_LANGUAGES
 load_dotenv()
 
 _raw_to = (os.environ.get("PIPELINE_HTTP_TIMEOUT") or "").strip()
-_PIPELINE_HTTP_TIMEOUT_S = int(_raw_to) if _raw_to else 1800
+# Default 40 min: up to 10 min STT + summarise + translate + TTS on slow networks.
+_PIPELINE_HTTP_TIMEOUT_S = int(_raw_to) if _raw_to else 2400
 
 STEP_LABELS = ("Input", "Transcribe", "Summarise", "Translate", "Speech")
 

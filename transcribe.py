@@ -129,7 +129,7 @@ def main() -> None:
             headers=_auth_headers(token),
             files=files,
             data=data,
-            timeout=300,
+            timeout=600,
         )
 
     if not resp.ok:
