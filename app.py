@@ -546,73 +546,74 @@ def main() -> None:
     _hero()
 
     try:
-        input_panel = st.container(border=True)
+        text_panel = st.container(border=True)
     except TypeError:
-        input_panel = st.container()
+        text_panel = st.container()
 
-    with input_panel:
-        _card_title("Input")
-        # Form keeps file_uploader value on submit (fixes HF/Streamlit losing the file when a
-        # standalone button triggers a rerun before the upload widget state is applied).
-        with st.form("sunbird_pipeline_form", clear_on_submit=False):
-            mode = st.radio(
-                "How would you like to provide content?",
-                ["Text", "Audio"],
-                horizontal=True,
-                key="input_mode",
+    with text_panel:
+        _card_title("Text input")
+        st.caption("Paste or type content to summarise, translate, and synthesise.")
+        st.markdown(
+            '<p class="sb-prompt">Your text</p>',
+            unsafe_allow_html=True,
+        )
+        text_value = st.text_area(
+            "Text",
+            height=200,
+            placeholder="Paste or type your text here…",
+            label_visibility="collapsed",
+            key="pipeline_text_body",
+        )
+        st.markdown(
+            '<p class="sb-prompt">Target language</p>',
+            unsafe_allow_html=True,
+        )
+        target_lang_text = st.selectbox(
+            "Target language (text)",
+            PIPELINE_TARGET_LANGUAGES,
+            key="target_lang_text",
+        )
+        run_text = st.button(
+            "Run text pipeline",
+            type="primary",
+            use_container_width=True,
+            key="run_text_pipeline",
+        )
+
+    try:
+        audio_panel = st.container(border=True)
+    except TypeError:
+        audio_panel = st.container()
+
+    with audio_panel:
+        _card_title("Audio input")
+        st.caption(
+            "Upload a file only for this path (not the text box above). "
+            "Recommended: MP3, WAV, OGG, M4A, AAC — max 5 minutes."
+        )
+        # Form is only around audio widgets + submit so the file survives the submit rerun (HF / Streamlit).
+        with st.form("audio_pipeline_form", clear_on_submit=False):
+            st.markdown(
+                '<p class="sb-prompt">Audio file</p>',
+                unsafe_allow_html=True,
             )
-
-            target_language = "Luganda"
-            text_value = ""
-            uploaded = None
-
-            if mode == "Audio":
-                st.markdown(
-                    '<p class="sb-prompt">Upload your audio file</p>',
-                    unsafe_allow_html=True,
-                )
-                st.caption(
-                    "Recommended: MP3, WAV, OGG, M4A, AAC (max 5 minutes). "
-                    "Other formats may still work — the server will reject unsupported audio."
-                )
-                uploaded = st.file_uploader(
-                    "Audio upload",
-                    type=None,
-                    label_visibility="collapsed",
-                    key="pipeline_audio_upload",
-                )
-                st.markdown(
-                    '<p class="sb-prompt">Target language</p>',
-                    unsafe_allow_html=True,
-                )
-                target_language = st.selectbox(
-                    "Target language",
-                    PIPELINE_TARGET_LANGUAGES,
-                    key="target_lang_audio",
-                )
-            else:
-                st.markdown(
-                    '<p class="sb-prompt">Enter the text you would like to process</p>',
-                    unsafe_allow_html=True,
-                )
-                text_value = st.text_area(
-                    "Text",
-                    height=200,
-                    placeholder="Paste or type your text here…",
-                    label_visibility="collapsed",
-                )
-                st.markdown(
-                    '<p class="sb-prompt">Target language</p>',
-                    unsafe_allow_html=True,
-                )
-                target_language = st.selectbox(
-                    "Target language",
-                    PIPELINE_TARGET_LANGUAGES,
-                    key="target_lang_text",
-                )
-
-            submitted = st.form_submit_button(
-                "Run pipeline",
+            audio_file = st.file_uploader(
+                "Upload audio for transcription",
+                type=None,
+                label_visibility="collapsed",
+                key="pipeline_audio_only",
+            )
+            st.markdown(
+                '<p class="sb-prompt">Target language</p>',
+                unsafe_allow_html=True,
+            )
+            target_lang_audio = st.selectbox(
+                "Target language (audio)",
+                PIPELINE_TARGET_LANGUAGES,
+                key="target_lang_audio",
+            )
+            submitted_audio = st.form_submit_button(
+                "Run audio pipeline",
                 type="primary",
                 use_container_width=True,
             )
@@ -629,7 +630,8 @@ def main() -> None:
             "last_pipeline_error"
         ):
             st.info(
-                "Fill in the **Input** section above, then press **Run pipeline**."
+                "Use **Text input** and **Run text pipeline**, or **Audio input** and **Run audio pipeline** — "
+                "they are separate paths."
             )
 
         if st.session_state.get("last_pipeline_error"):
@@ -644,61 +646,97 @@ def main() -> None:
                 float(stored.get("elapsed_s", 0)),
             )
 
-    if not submitted:
-        return
+    if run_text:
+        if not text_value.strip():
+            st.warning("Please enter some text before running the text pipeline.")
+            return
 
-    if mode == "Text" and not text_value.strip():
-        st.warning("Please enter some text before running the pipeline.")
-        return
-    if mode == "Audio" and uploaded is None:
-        st.warning("Please upload an audio file before running the pipeline.")
-        return
+        st.session_state["last_pipeline_error"] = None
+        st.session_state["last_pipeline_result"] = None
 
-    st.session_state["last_pipeline_error"] = None
-    st.session_state["last_pipeline_result"] = None
+        t0 = time.perf_counter()
+        with st.spinner("Processing…"):
+            try:
+                resp = post_pipeline(
+                    backend,
+                    target_language=target_lang_text,
+                    text=text_value.strip(),
+                    audio=None,
+                )
+            except requests.RequestException as exc:
+                st.session_state["last_pipeline_result"] = None
+                st.session_state["last_pipeline_error"] = (
+                    f"Could not reach the backend at `{backend}`: {exc}\n\n"
+                    "Start the API from the project root: "
+                    "`uvicorn backend.main:app --reload --port 8000`"
+                )
+                st.rerun()
 
-    t0 = time.perf_counter()
-    with st.spinner("Processing… transcription can take a moment"):
-        try:
-            resp = post_pipeline(
-                backend,
-                target_language=target_language,
-                text=text_value.strip() if mode == "Text" else None,
-                audio=(
-                    (
-                        uploaded.name,
-                        uploaded.getvalue(),
-                        uploaded.type or "application/octet-stream",
-                    )
-                    if mode == "Audio" and uploaded is not None
-                    else None
-                ),
-            )
-        except requests.RequestException as exc:
+        elapsed = time.perf_counter() - t0
+
+        if not resp.ok:
             st.session_state["last_pipeline_result"] = None
-            st.session_state["last_pipeline_error"] = (
-                f"Could not reach the backend at `{backend}`: {exc}\n\n"
-                "Start the API from the project root: "
-                "`uvicorn backend.main:app --reload --port 8000`"
-            )
+            st.session_state["last_pipeline_error"] = _format_error(resp)
             st.rerun()
 
-    elapsed = time.perf_counter() - t0
-
-    if not resp.ok:
-        st.session_state["last_pipeline_result"] = None
-        st.session_state["last_pipeline_error"] = _format_error(resp)
+        result = resp.json()
+        st.session_state["last_pipeline_result"] = {
+            "result": result,
+            "elapsed_s": elapsed,
+            "mode": "Text",
+            "target_language": target_lang_text,
+        }
+        st.session_state["last_pipeline_error"] = None
         st.rerun()
 
-    result = resp.json()
-    st.session_state["last_pipeline_result"] = {
-        "result": result,
-        "elapsed_s": elapsed,
-        "mode": mode,
-        "target_language": target_language,
-    }
-    st.session_state["last_pipeline_error"] = None
-    st.rerun()
+    elif submitted_audio:
+        if audio_file is None:
+            st.warning("Please choose an audio file in **Audio input**, then press **Run audio pipeline**.")
+            return
+
+        st.session_state["last_pipeline_error"] = None
+        st.session_state["last_pipeline_result"] = None
+
+        t0 = time.perf_counter()
+        with st.spinner("Processing… transcription can take a moment"):
+            try:
+                resp = post_pipeline(
+                    backend,
+                    target_language=target_lang_audio,
+                    text=None,
+                    audio=(
+                        audio_file.name,
+                        audio_file.getvalue(),
+                        audio_file.type or "application/octet-stream",
+                    ),
+                )
+            except requests.RequestException as exc:
+                st.session_state["last_pipeline_result"] = None
+                st.session_state["last_pipeline_error"] = (
+                    f"Could not reach the backend at `{backend}`: {exc}\n\n"
+                    "Start the API from the project root: "
+                    "`uvicorn backend.main:app --reload --port 8000`"
+                )
+                st.rerun()
+
+        elapsed = time.perf_counter() - t0
+
+        if not resp.ok:
+            st.session_state["last_pipeline_result"] = None
+            st.session_state["last_pipeline_error"] = _format_error(resp)
+            st.rerun()
+
+        result = resp.json()
+        st.session_state["last_pipeline_result"] = {
+            "result": result,
+            "elapsed_s": elapsed,
+            "mode": "Audio",
+            "target_language": target_lang_audio,
+        }
+        st.session_state["last_pipeline_error"] = None
+        st.rerun()
+
+    return
 
 
 if __name__ == "__main__":
